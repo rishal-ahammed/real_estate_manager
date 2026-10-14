@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import '../../../data/models/property_model.dart';
 import '../providers/app_state.dart';
 import 'add_property/add_property_shell.dart';
 import 'property_detail_screen.dart';
