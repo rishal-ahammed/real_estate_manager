@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:real_estate_manager/features/properties/providers/app_state.dart';
+
+import 'add_requirement/add_requirement_shell.dart';
+import 'requirement_detail_screen.dart';
 // Note: Update these two imports to match your actual file paths!
 // import 'add_requirement/add_requirement_shell.dart';
 // import 'requirement_detail_screen.dart';
@@ -93,11 +96,10 @@ class _RequirementsScreenState extends State<RequirementsScreen> {
         padding: const EdgeInsets.only(bottom: 100.0, right: 10.0),
         child: FloatingActionButton(
           onPressed: () {
-            // Uncomment and use your actual navigation logic here
-            // Navigator.push(
-            //   context,
-            //   MaterialPageRoute(builder: (_) => const AddRequirementShell()),
-            // );
+            Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => const AddRequirementShell()),
+            );
           },
           child: const Icon(Icons.add),
         ),
@@ -132,18 +134,20 @@ class _RequirementsScreenState extends State<RequirementsScreen> {
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       child: InkWell(
         onTap: () {
-          // Uncomment and pass the map to your detail screen when ready
-          // Navigator.push(
-          //   context,
-          //   MaterialPageRoute(
-          //     builder: (context) => RequirementDetailScreen(requirement: req),
-          //   ),
-          // );
+          // Make sure RequirementDetailScreen is imported at the top of your file!
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (context) => RequirementDetailScreen(requirement: req),
+            ),
+          );
         },
         child: Padding(
           padding: const EdgeInsets.all(16.0),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize
+                .min, // THE FIX: Forces column to shrink-wrap its content
             children: [
               // Header Row: ID and Status
               Row(

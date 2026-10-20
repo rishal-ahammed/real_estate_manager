@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
 import '../../../../data/models/requirement_model.dart';
-// Add this import at the top of the file:
-import '../../providers/requirement_state.dart';
-// Add this import at the top so we can talk to Drive:
 import '../../../../core/services/storage_service.dart';
+
+// IMPORTANT: We import app_state here so we can instantly refresh the list!
+import '../../../properties/providers/app_state.dart';
 
 class RequirementDraftProvider extends ChangeNotifier {
   Requirement draft = Requirement();
@@ -38,12 +38,12 @@ class AddRequirementShell extends StatefulWidget {
 
 class _AddRequirementShellState extends State<AddRequirementShell> {
   final _draftProvider = RequirementDraftProvider();
-  
+
   final List<String> _stepTitles = [
     'Client Info',
     'Property Specs',
     'Budget & Location',
-    'Review'
+    'Review',
   ];
 
   @override
@@ -71,10 +71,16 @@ class _AddRequirementShellState extends State<AddRequirementShell> {
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text('Add Requirement', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+            const Text(
+              'Add Requirement',
+              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+            ),
             Text(
               'Step ${_draftProvider.currentStep + 1} of 4: ${_stepTitles[_draftProvider.currentStep]}',
-              style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.primary),
+              style: TextStyle(
+                fontSize: 12,
+                color: Theme.of(context).colorScheme.primary,
+              ),
             ),
           ],
         ),
@@ -85,7 +91,9 @@ class _AddRequirementShellState extends State<AddRequirementShell> {
               child: Text(
                 '${_draftProvider.draft.readinessScore}% Complete',
                 style: TextStyle(
-                  color: _draftProvider.draft.readinessScore > 50 ? Colors.green : Colors.orange,
+                  color: _draftProvider.draft.readinessScore > 50
+                      ? Colors.green
+                      : Colors.orange,
                   fontWeight: FontWeight.bold,
                 ),
               ),
@@ -99,9 +107,11 @@ class _AddRequirementShellState extends State<AddRequirementShell> {
           LinearProgressIndicator(
             value: (_draftProvider.currentStep + 1) / 4,
             backgroundColor: Colors.grey.shade200,
-            valueColor: AlwaysStoppedAnimation<Color>(Theme.of(context).colorScheme.primary),
+            valueColor: AlwaysStoppedAnimation<Color>(
+              Theme.of(context).colorScheme.primary,
+            ),
           ),
-          
+
           // Form Content
           Expanded(
             child: SingleChildScrollView(
@@ -109,14 +119,18 @@ class _AddRequirementShellState extends State<AddRequirementShell> {
               child: _buildCurrentStep(),
             ),
           ),
-          
+
           // Bottom Navigation Buttons
           Container(
             padding: const EdgeInsets.all(16),
             decoration: BoxDecoration(
               color: Colors.white,
               boxShadow: [
-                BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10, offset: const Offset(0, -5))
+                BoxShadow(
+                  color: Colors.black.withOpacity(0.05),
+                  blurRadius: 10,
+                  offset: const Offset(0, -5),
+                ),
               ],
             ),
             child: Row(
@@ -125,7 +139,9 @@ class _AddRequirementShellState extends State<AddRequirementShell> {
                   Expanded(
                     child: OutlinedButton(
                       onPressed: _draftProvider.previousStep,
-                      style: OutlinedButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 16)),
+                      style: OutlinedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(vertical: 16),
+                      ),
                       child: const Text('Back'),
                     ),
                   )
@@ -139,28 +155,37 @@ class _AddRequirementShellState extends State<AddRequirementShell> {
                       if (_draftProvider.currentStep < 3) {
                         _draftProvider.nextStep();
                       } else {
-                        // 1. Save locally to UI State (Generates the REQ- ID)
-                        requirementState.addRequirement(_draftProvider.draft);
-                        
-                        // 2. Show a quick loading snackbar
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(content: Text('Saving to Google Drive...')),
-                        );
-
                         try {
-                           // 3. ACTUALLY SAVE TO GOOGLE DRIVE!
-                           await storageService.saveRequirement(_draftProvider.draft);
-                           
-                           ScaffoldMessenger.of(context).showSnackBar(
-                             const SnackBar(content: Text('Saved Successfully!'), backgroundColor: Colors.green),
-                           );
-                           
-                           // 4. Close the form
-                           if (context.mounted) Navigator.pop(context);
+                          // 1. Generate a unique local ID if missing
+                          if (_draftProvider.draft.requirementId == null || _draftProvider.draft.requirementId!.isEmpty) {
+                            _draftProvider.draft.requirementId = 'REQ-${DateTime.now().millisecondsSinceEpoch}';
+                          }
+
+                          // 2. Save instantly to local device storage!
+                          await storageService.saveRequirement(_draftProvider.draft);
+                          
+                          // 3. Force the global AppState to fetch the new data instantly!
+                          await appState.loadRequirements();
+
+                          if (context.mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text('✅ Requirement saved instantly!'),
+                                backgroundColor: Colors.green,
+                              ),
+                            );
+                            // 4. Close the form
+                            Navigator.pop(context);
+                          }
                         } catch (e) {
-                           ScaffoldMessenger.of(context).showSnackBar(
-                             SnackBar(content: Text('Failed to save to Drive: $e'), backgroundColor: Colors.red),
-                           );
+                          if (context.mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content: Text('❌ Error: $e'),
+                                backgroundColor: Colors.red,
+                              ),
+                            );
+                          }
                         }
                       }
                     },
@@ -169,7 +194,11 @@ class _AddRequirementShellState extends State<AddRequirementShell> {
                       foregroundColor: Colors.white,
                       padding: const EdgeInsets.symmetric(vertical: 16),
                     ),
-                    child: Text(_draftProvider.currentStep == 3 ? 'Save Requirement' : 'Continue'),
+                    child: Text(
+                      _draftProvider.currentStep == 3
+                          ? 'Save Requirement'
+                          : 'Continue',
+                    ),
                   ),
                 ),
               ],
@@ -205,18 +234,27 @@ class _Step1ClientInfo extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Text('Client Information', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+        const Text(
+          'Client Information',
+          style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+        ),
         const SizedBox(height: 16),
         TextFormField(
           initialValue: provider.draft.customerName,
-          decoration: const InputDecoration(labelText: 'Customer Name', prefixIcon: Icon(Icons.person)),
+          decoration: const InputDecoration(
+            labelText: 'Customer Name',
+            prefixIcon: Icon(Icons.person),
+          ),
           onChanged: (val) => provider.updateDraft((d) => d.customerName = val),
         ),
         const SizedBox(height: 16),
         TextFormField(
           initialValue: provider.draft.phone,
           keyboardType: TextInputType.phone,
-          decoration: const InputDecoration(labelText: 'Phone Number', prefixIcon: Icon(Icons.phone)),
+          decoration: const InputDecoration(
+            labelText: 'Phone Number',
+            prefixIcon: Icon(Icons.phone),
+          ),
           onChanged: (val) => provider.updateDraft((d) => d.phone = val),
         ),
         const SizedBox(height: 24),
@@ -228,8 +266,9 @@ class _Step1ClientInfo extends StatelessWidget {
             ButtonSegment(value: 'Rent', label: Text('Rent')),
             ButtonSegment(value: 'Lease', label: Text('Lease')),
           ],
-          selected: {provider.draft.purpose},
-          onSelectionChanged: (set) => provider.updateDraft((d) => d.purpose = set.first),
+          selected: {provider.draft.purpose ?? 'Buy'}, // Safely handle null
+          onSelectionChanged: (set) =>
+              provider.updateDraft((d) => d.purpose = set.first),
         ),
       ],
     );
@@ -245,7 +284,10 @@ class _Step2Specs extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Text('Property Type', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+        const Text(
+          'Property Type',
+          style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+        ),
         const SizedBox(height: 16),
         Wrap(
           spacing: 8,
@@ -253,12 +295,16 @@ class _Step2Specs extends StatelessWidget {
             return ChoiceChip(
               label: Text(type),
               selected: provider.draft.propertyType == type,
-              onSelected: (val) => provider.updateDraft((d) => d.propertyType = type),
+              onSelected: (val) =>
+                  provider.updateDraft((d) => d.propertyType = type),
             );
           }).toList(),
         ),
         const SizedBox(height: 24),
-        const Text('Minimum BHK (Optional)', style: TextStyle(fontWeight: FontWeight.bold)),
+        const Text(
+          'Minimum BHK (Optional)',
+          style: TextStyle(fontWeight: FontWeight.bold),
+        ),
         const SizedBox(height: 8),
         Slider(
           value: (provider.draft.bhk ?? 1).toDouble(),
@@ -282,21 +328,37 @@ class _Step3BudgetLocation extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Text('Preferred Location', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+        const Text(
+          'Preferred Location',
+          style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+        ),
         const SizedBox(height: 16),
         TextFormField(
           initialValue: provider.draft.location,
-          decoration: const InputDecoration(labelText: 'City or Area', prefixIcon: Icon(Icons.location_on)),
+          decoration: const InputDecoration(
+            labelText: 'City or Area',
+            prefixIcon: Icon(Icons.location_on),
+          ),
           onChanged: (val) => provider.updateDraft((d) => d.location = val),
         ),
         const SizedBox(height: 24),
-        const Text('Maximum Budget (₹)', style: TextStyle(fontWeight: FontWeight.bold)),
+        const Text(
+          'Maximum Budget (₹)',
+          style: TextStyle(fontWeight: FontWeight.bold),
+        ),
         const SizedBox(height: 16),
         TextFormField(
-          initialValue: provider.draft.maxBudget > 0 ? provider.draft.maxBudget.toStringAsFixed(0) : '',
+          initialValue: (provider.draft.maxBudget ?? 0) > 0
+              ? provider.draft.maxBudget?.toStringAsFixed(0)
+              : '',
           keyboardType: TextInputType.number,
-          decoration: const InputDecoration(labelText: 'Max Budget', prefixIcon: Icon(Icons.currency_rupee)),
-          onChanged: (val) => provider.updateDraft((d) => d.maxBudget = double.tryParse(val) ?? 0),
+          decoration: const InputDecoration(
+            labelText: 'Max Budget',
+            prefixIcon: Icon(Icons.currency_rupee),
+          ),
+          onChanged: (val) => provider.updateDraft(
+            (d) => d.maxBudget = double.tryParse(val) ?? 0,
+          ),
         ),
       ],
     );
@@ -312,7 +374,10 @@ class _Step4Review extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Text('Review Requirement', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+        const Text(
+          'Review Requirement',
+          style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+        ),
         const SizedBox(height: 16),
         Card(
           child: Padding(
@@ -321,17 +386,22 @@ class _Step4Review extends StatelessWidget {
               children: [
                 ListTile(
                   title: const Text('Customer'),
-                  subtitle: Text('${provider.draft.customerName} - ${provider.draft.phone}'),
+                  // Fixed the syntax error on the newline here
+                  subtitle: Text(
+                    '${provider.draft.customerName ?? ''}\n${provider.draft.phone ?? ''}',
+                  ),
                 ),
                 const Divider(),
                 ListTile(
                   title: const Text('Looking For'),
-                  subtitle: Text('${provider.draft.purpose} a ${provider.draft.propertyType} in ${provider.draft.location}'),
+                  subtitle: Text(
+                    '${provider.draft.purpose ?? 'Buy'} a ${provider.draft.propertyType ?? 'Property'} in ${provider.draft.location ?? 'Any'}',
+                  ),
                 ),
                 const Divider(),
                 ListTile(
                   title: const Text('Budget'),
-                  subtitle: Text('Up to ₹${provider.draft.maxBudget}'),
+                  subtitle: Text('Up to ₹${provider.draft.maxBudget ?? 0}'),
                 ),
               ],
             ),

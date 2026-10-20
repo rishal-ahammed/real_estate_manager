@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 
 class PropertyDetailScreen extends StatelessWidget {
-  final dynamic property; // Accepting dynamic to handle both Index and Full property models for now
+  final dynamic property; // Accepting dynamic to handle the Map from local storage
 
   const PropertyDetailScreen({super.key, required this.property});
 
@@ -16,6 +16,22 @@ class PropertyDetailScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     // Custom Teal color to match your screenshot
     const primaryTeal = Color(0xFF00796B); 
+
+    // Safely cast property to Map to avoid NoSuchMethod errors
+    final Map<String, dynamic> prop = property is Map ? property : {};
+
+    // Extracting nested values safely
+    final double budget = (prop['pricing']?['budget'] ?? 0).toDouble();
+    final String propertyName = prop['propertyName']?.toString() ?? 'Property Details';
+    final String propertyType = prop['propertyType']?.toString() ?? '';
+    final String propertyId = prop['propertyId']?.toString() ?? 'N/A';
+    final String bhk = prop['specifications']?['bhk']?.toString() ?? '0';
+    
+    // Safely extract location
+    final Map<String, dynamic>? loc = prop['location'];
+    final String locationDisplay = loc != null && loc['city'] != null 
+        ? '${loc['area'] ?? ''}, ${loc['city']}'.trim() 
+        : 'Kannur';
 
     return Scaffold(
       backgroundColor: Colors.grey.shade50,
@@ -35,7 +51,7 @@ class PropertyDetailScreen extends StatelessWidget {
           onPressed: () => Navigator.pop(context),
         ),
         title: Text(
-          property.propertyName ?? 'Property Details',
+          propertyName,
           style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
         ),
         actions: [
@@ -49,16 +65,16 @@ class PropertyDetailScreen extends StatelessWidget {
         padding: const EdgeInsets.all(16.0),
         child: Column(
           children: [
-            _buildHeaderCard(primaryTeal),
+            _buildHeaderCard(primaryTeal, budget, propertyName, bhk, propertyType),
             const SizedBox(height: 16),
             
-            _buildInformationCard(primaryTeal),
+            _buildInformationCard(primaryTeal, prop, propertyId, propertyType, bhk),
             const SizedBox(height: 16),
             
             _buildContactCard(primaryTeal),
             const SizedBox(height: 16),
             
-            _buildLocationCard(primaryTeal),
+            _buildLocationCard(primaryTeal, locationDisplay),
             const SizedBox(height: 32),
           ],
         ),
@@ -66,7 +82,7 @@ class PropertyDetailScreen extends StatelessWidget {
     );
   }
 
-  Widget _buildHeaderCard(Color primaryColor) {
+  Widget _buildHeaderCard(Color primaryColor, double budget, String name, String bhk, String type) {
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(20),
@@ -79,7 +95,7 @@ class PropertyDetailScreen extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            _formatCurrency(property.budget ?? 500000),
+            _formatCurrency(budget),
             style: TextStyle(
               fontSize: 28,
               fontWeight: FontWeight.w900,
@@ -93,12 +109,12 @@ class PropertyDetailScreen extends StatelessWidget {
           ),
           const SizedBox(height: 16),
           Text(
-            property.propertyName ?? 'Unknown Property',
+            name,
             style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
           ),
           const SizedBox(height: 4),
           Text(
-            '${property.bhk ?? 0} BHK  ${property.propertyType ?? ""}',
+            '$bhk BHK  $type',
             style: TextStyle(color: Colors.grey.shade600, fontSize: 14, fontWeight: FontWeight.w500),
           ),
         ],
@@ -106,7 +122,7 @@ class PropertyDetailScreen extends StatelessWidget {
     );
   }
 
-  Widget _buildInformationCard(Color primaryColor) {
+  Widget _buildInformationCard(Color primaryColor, Map<String, dynamic> prop, String propertyId, String type, String bhk) {
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
@@ -130,9 +146,9 @@ class PropertyDetailScreen extends StatelessWidget {
           const SizedBox(height: 24),
           _buildInfoRow('Property Document', 'Available'),
           _buildDivider(),
-          _buildInfoRow('Property ID', property.propertyId ?? 'N/A'),
+          _buildInfoRow('Property ID', propertyId),
           _buildDivider(),
-          _buildInfoRow('Type', '${property.propertyType ?? ""} Single'),
+          _buildInfoRow('Type', type.isNotEmpty ? type : 'N/A'),
           _buildDivider(),
           _buildInfoRow('Width', '2000'),
           _buildDivider(),
@@ -144,7 +160,7 @@ class PropertyDetailScreen extends StatelessWidget {
           _buildDivider(),
           _buildInfoRow('Buildup Area', '25000', suffix: 'sq.ft'),
           _buildDivider(),
-          _buildInfoRow('BHK', '${property.bhk ?? 0}', suffix: 'BHK'),
+          _buildInfoRow('BHK', bhk, suffix: 'BHK'),
           _buildDivider(),
           _buildInfoRow('No of Floors', '2'),
           _buildDivider(),
@@ -156,7 +172,7 @@ class PropertyDetailScreen extends StatelessWidget {
           _buildDivider(),
           _buildInfoRow('Direction', 'South'),
           _buildDivider(),
-          _buildInfoRow('Created At', '30 Sept 2026, 2:31 pm'),
+          _buildInfoRow('Status', prop['status']?.toString() ?? 'ACTIVE'),
         ],
       ),
     );
@@ -212,7 +228,7 @@ class PropertyDetailScreen extends StatelessWidget {
     );
   }
 
-  Widget _buildLocationCard(Color primaryColor) {
+  Widget _buildLocationCard(Color primaryColor, String locationDisplay) {
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(20),
@@ -236,12 +252,12 @@ class PropertyDetailScreen extends StatelessWidget {
           ),
           const SizedBox(height: 20),
           Text(
-            property.location ?? 'Kannur',
+            locationDisplay,
             style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
           ),
           const SizedBox(height: 8),
           const Text(
-            'Address not available',
+            'Address details fetched from saved data.',
             style: TextStyle(fontWeight: FontWeight.w500, fontSize: 14),
           ),
         ],

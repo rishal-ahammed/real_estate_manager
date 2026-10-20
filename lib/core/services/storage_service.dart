@@ -124,19 +124,28 @@ class LocalDeviceStorageService implements StorageService {
     try {
       final rootDir = await _getRootDirectory();
       final propertiesFolder = Directory('${rootDir.path}/Properties');
-
+      
       if (!await propertiesFolder.exists()) return [];
 
       List<Map<String, dynamic>> propertiesList = [];
-
-      // Loop through all folders inside the Properties directory
+      
       final entities = propertiesFolder.listSync();
       for (var entity in entities) {
         if (entity is Directory) {
           final jsonFile = File('${entity.path}/property.json');
           if (jsonFile.existsSync()) {
             final jsonString = await jsonFile.readAsString();
-            propertiesList.add(jsonDecode(jsonString));
+            final Map<String, dynamic> data = jsonDecode(jsonString);
+            
+            // THE FIX: Find local images and attach the first one to the data!
+            final imagesFolder = Directory('${entity.path}/Images');
+            if (imagesFolder.existsSync()) {
+              final images = imagesFolder.listSync().whereType<File>().toList();
+              if (images.isNotEmpty) {
+                data['coverImagePath'] = images.first.path; 
+              }
+            }
+            propertiesList.add(data);
           }
         }
       }
