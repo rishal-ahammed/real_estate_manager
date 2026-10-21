@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:image_cropper/image_cropper.dart'; // NEW: Added cropper package
 import '../../../../data/models/property_model.dart';
 import '../../../../core/services/storage_service.dart';
 import '../../providers/app_state.dart';
@@ -14,7 +15,6 @@ class PropertyDraftProvider extends ChangeNotifier {
   int currentStep = 0;
   bool isSaving = false;
 
-  // NEW: Store selected image paths
   List<String> imagePaths = [];
   final ImagePicker _picker = ImagePicker();
 
@@ -42,15 +42,41 @@ class PropertyDraftProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  // NEW: Image Picking Logic
+  // UPDATED: Image Picking Logic with Cropper (Fitment Assist)
   Future<void> pickImages() async {
     try {
-      final List<XFile> images = await _picker.pickMultiImage(
-        imageQuality: 80, // Compress slightly for faster uploads
-      );
+      final List<XFile> images = await _picker.pickMultiImage(imageQuality: 80);
+
       if (images.isNotEmpty) {
-        final newPaths = images.map((e) => e.path).toList();
-        imagePaths.addAll(newPaths);
+        for (var img in images) {
+          // Open the cropper for each image selected
+          CroppedFile? croppedFile = await ImageCropper().cropImage(
+            sourcePath: img.path,
+            aspectRatio: const CropAspectRatio(
+              ratioX: 4,
+              ratioY: 5,
+            ), // Forces perfect rectangle
+            uiSettings: [
+              AndroidUiSettings(
+                toolbarTitle: 'Adjust Image Fit',
+                toolbarColor: const Color(0xFF00796B), // Match your theme
+                toolbarWidgetColor: Colors.white,
+                // initAspectRatio: CropAspectRatioPreset.ratio4x5,
+                lockAspectRatio: true, // Prevents free-form cropping
+              ),
+              IOSUiSettings(
+                title: 'Adjust Image Fit',
+                aspectRatioLockEnabled: true,
+                resetAspectRatioEnabled: false,
+              ),
+            ],
+          );
+
+          if (croppedFile != null) {
+            imagePaths.add(croppedFile.path);
+          }
+        }
+
         // Restrict to max 5 images
         if (imagePaths.length > 5) {
           imagePaths = imagePaths.sublist(0, 5);
@@ -58,7 +84,7 @@ class PropertyDraftProvider extends ChangeNotifier {
         notifyListeners();
       }
     } catch (e) {
-      debugPrint('Error picking images: $e');
+      debugPrint('Error picking and cropping images: $e');
     }
   }
 
@@ -67,24 +93,20 @@ class PropertyDraftProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  // UPDATED: Now returns the error message as a String so the UI can show it
   Future<String?> saveToDrive() async {
     isSaving = true;
     notifyListeners();
 
     try {
-      // THE FIX: Generate a unique ID if it doesn't have one!
       if (draft.propertyId == null || draft.propertyId!.isEmpty) {
-        // Creates an ID like: PROP-1728205533000
         draft.propertyId = 'PROP-${DateTime.now().millisecondsSinceEpoch}';
       }
 
-      // Pass the selected images to the Drive service!
       await storageService.saveProperty(draft, imagePaths: imagePaths);
       await appState.loadProperties();
-      return null; // Return null means SUCCESS
+      return null;
     } catch (e) {
-      return e.toString(); // Return the exact error string
+      return e.toString();
     } finally {
       isSaving = false;
       notifyListeners();
@@ -206,30 +228,23 @@ class _AddPropertyShellState extends State<AddPropertyShell> {
                 onPressed: _draftProvider.isSaving
                     ? null
                     : () async {
-                        // UPDATED SAVE LOGIC
                         final errorMsg = await _draftProvider.saveToDrive();
 
                         if (mounted) {
                           if (errorMsg == null) {
-                            // Success!
                             Navigator.pop(context);
                             ScaffoldMessenger.of(context).showSnackBar(
                               const SnackBar(
-                                content: Text(
-                                  'Property Saved to Google Drive Successfully',
-                                ),
+                                content: Text('Property Saved Successfully'),
                                 backgroundColor: Colors.green,
                               ),
                             );
                           } else {
-                            // Failed! Show the exact error on the screen
                             ScaffoldMessenger.of(context).showSnackBar(
                               SnackBar(
                                 content: Text('Failed: $errorMsg'),
                                 backgroundColor: Colors.red,
-                                duration: const Duration(
-                                  seconds: 5,
-                                ), // Keep it open longer to read
+                                duration: const Duration(seconds: 5),
                               ),
                             );
                           }
@@ -279,7 +294,6 @@ class _AddPropertyShellState extends State<AddPropertyShell> {
   }
 }
 
-// ... (Steps 1, 2, 3 remain exactly the same)
 class Step1Basic extends StatelessWidget {
   final PropertyDraftProvider provider;
   const Step1Basic({super.key, required this.provider});
@@ -537,7 +551,6 @@ class Step3Details extends StatelessWidget {
   }
 }
 
-// UPDATED: STEP 4 NOW HAS REAL IMAGE PICKING UI
 class Step4Media extends StatelessWidget {
   final PropertyDraftProvider provider;
   const Step4Media({super.key, required this.provider});
@@ -553,7 +566,6 @@ class Step4Media extends StatelessWidget {
         ),
         const SizedBox(height: 24),
 
-        // NEW: Image Picker Button
         GestureDetector(
           onTap: provider.pickImages,
           child: Container(
@@ -573,7 +585,7 @@ class Step4Media extends StatelessWidget {
                 const SizedBox(height: 8),
                 const Text('Tap to select images (Max 5)'),
                 Text(
-                  'Images will upload to Google Drive',
+                  'Images will be cropped to a perfect 16:9 ratio',
                   style: TextStyle(fontSize: 12, color: Colors.grey.shade500),
                 ),
               ],
@@ -581,7 +593,6 @@ class Step4Media extends StatelessWidget {
           ),
         ),
 
-        // NEW: Display the selected images in a small grid
         if (provider.imagePaths.isNotEmpty) ...[
           const SizedBox(height: 16),
           Wrap(
@@ -771,7 +782,7 @@ class Step6Review extends StatelessWidget {
           'Negotiable': d.isNegotiable ? 'Yes' : 'No',
         }),
         _buildSection(context, 'Location', 4, {
-          'Address': '${d.area}, ${d.city}, ${d.state} - ${d.pincode}',
+          'Address': '${d.area}, ${d.city}, ${d.state}\n${d.pincode}',
         }),
       ],
     );

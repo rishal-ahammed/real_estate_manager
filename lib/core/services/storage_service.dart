@@ -61,18 +61,21 @@ class LocalDeviceStorageService implements StorageService {
       final file = File('${propertyFolder.path}/property.json');
       await file.writeAsString(jsonEncode(propertyJson));
 
-      // Copy images to local storage
+      // FIX 1: Generate a perfectly unique name for EVERY cropped image
       if (imagePaths != null && imagePaths.isNotEmpty) {
         final imagesFolder = Directory('${propertyFolder.path}/Images');
         if (!await imagesFolder.exists()) {
           await imagesFolder.create(recursive: true);
         }
 
+        int index = 1;
         for (String path in imagePaths) {
           final originalFile = File(path);
           if (originalFile.existsSync()) {
-            final fileName = path.split('/').last;
-            await originalFile.copy('${imagesFolder.path}/$fileName');
+            final extension = path.contains('.') ? path.split('.').last : 'jpg';
+            final uniqueFileName = 'property_img_$index.$extension';
+            await originalFile.copy('${imagesFolder.path}/$uniqueFileName');
+            index++;
           }
         }
       }
@@ -112,9 +115,9 @@ class LocalDeviceStorageService implements StorageService {
       final file = File('${reqFolder.path}/requirement.json');
       await file.writeAsString(jsonEncode(reqJson));
 
-      debugPrint('✅ Requirement saved locally to device!');
+      debugPrint('✅ Requirement saved locally!');
     } catch (e) {
-      debugPrint('❌ Failed to save Requirement locally: $e');
+      debugPrint('❌ Failed to save Requirement: $e');
       rethrow;
     }
   }
@@ -124,11 +127,11 @@ class LocalDeviceStorageService implements StorageService {
     try {
       final rootDir = await _getRootDirectory();
       final propertiesFolder = Directory('${rootDir.path}/Properties');
-      
+
       if (!await propertiesFolder.exists()) return [];
 
       List<Map<String, dynamic>> propertiesList = [];
-      
+
       final entities = propertiesFolder.listSync();
       for (var entity in entities) {
         if (entity is Directory) {
@@ -136,13 +139,15 @@ class LocalDeviceStorageService implements StorageService {
           if (jsonFile.existsSync()) {
             final jsonString = await jsonFile.readAsString();
             final Map<String, dynamic> data = jsonDecode(jsonString);
-            
-            // THE FIX: Find local images and attach the first one to the data!
+
+            // FIX 2: Grab the unique images and package them into an array!
             final imagesFolder = Directory('${entity.path}/Images');
             if (imagesFolder.existsSync()) {
               final images = imagesFolder.listSync().whereType<File>().toList();
               if (images.isNotEmpty) {
-                data['coverImagePath'] = images.first.path; 
+                data['coverImagePath'] = images.first.path;
+                // This exact line feeds the swipeable gallery:
+                data['allImagePaths'] = images.map((img) => img.path).toList();
               }
             }
             propertiesList.add(data);
@@ -151,7 +156,7 @@ class LocalDeviceStorageService implements StorageService {
       }
       return propertiesList;
     } catch (e) {
-      debugPrint('Error fetching local properties: $e');
+      debugPrint('Error fetching properties: $e');
       return [];
     }
   }
@@ -178,14 +183,13 @@ class LocalDeviceStorageService implements StorageService {
       }
       return reqList;
     } catch (e) {
-      debugPrint('Error fetching local requirements: $e');
+      debugPrint('Error fetching requirements: $e');
       return [];
     }
   }
 
   @override
   Future<void> archiveProperty(String id) async {
-    // Basic implementation for deleting local properties
     try {
       final rootDir = await _getRootDirectory();
       final propertyFolder = Directory('${rootDir.path}/Properties/$id');
@@ -194,10 +198,10 @@ class LocalDeviceStorageService implements StorageService {
         debugPrint('Deleted local property: $id');
       }
     } catch (e) {
-      debugPrint('Failed to delete local property: $e');
+      debugPrint('Failed to delete property: $e');
     }
   }
 }
 
-// Global instance swapped to the local version
+// Global instance
 final storageService = LocalDeviceStorageService();

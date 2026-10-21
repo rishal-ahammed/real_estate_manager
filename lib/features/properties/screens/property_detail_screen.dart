@@ -1,37 +1,106 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
+// Added imports to access your storage and state
+import '../../../core/services/storage_service.dart'; 
+import '../providers/app_state.dart';
 
-class PropertyDetailScreen extends StatelessWidget {
-  final dynamic property; // Accepting dynamic to handle the Map from local storage
+class PropertyDetailScreen extends StatefulWidget {
+  final dynamic property;
 
   const PropertyDetailScreen({super.key, required this.property});
 
-  // Helper for formatting large currency
+  @override
+  State<PropertyDetailScreen> createState() => _PropertyDetailScreenState();
+}
+
+class _PropertyDetailScreenState extends State<PropertyDetailScreen> {
+  int _currentImageIndex = 0;
+
   String _formatCurrency(double amount) {
-    if (amount >= 10000000) return '₹${(amount / 10000000).toStringAsFixed(2)} Cr';
-    if (amount >= 100000) return '₹${(amount / 100000).toStringAsFixed(0)} Lakhs';
+    if (amount >= 10000000) {
+      return '₹${(amount / 10000000).toStringAsFixed(2)} Cr';
+    }
+    if (amount >= 100000) {
+      return '₹${(amount / 100000).toStringAsFixed(0)} Lakhs';
+    }
     return '₹${amount.toStringAsFixed(0)}';
+  }
+
+  // THE DELETE WORKFLOW
+  Future<void> _confirmDelete(BuildContext context, String propertyId) async {
+    showDialog(
+      context: context,
+      builder: (BuildContext dialogContext) {
+        return AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: const Row(
+            children: [
+              Icon(Icons.warning_amber_rounded, color: Colors.red),
+              SizedBox(width: 8),
+              Text('Delete Property'),
+            ],
+          ),
+          content: const Text(
+            'Are you sure you want to permanently delete this property? This action cannot be undone.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              child: const Text('Cancel', style: TextStyle(color: Colors.black87)),
+            ),
+            FilledButton(
+              style: FilledButton.styleFrom(backgroundColor: Colors.red),
+              onPressed: () async {
+                // 1. Close the dialog
+                Navigator.pop(dialogContext);
+                
+                // 2. Delete the property folder locally
+                await storageService.archiveProperty(propertyId);
+                
+                // 3. Refresh the main properties list
+                await appState.loadProperties();
+                
+                // 4. Go back to the main grid and show success message
+                if (context.mounted) {
+                  Navigator.pop(context);
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('Property deleted successfully'),
+                      backgroundColor: Colors.redAccent,
+                      behavior: SnackBarBehavior.floating,
+                    ),
+                  );
+                }
+              },
+              child: const Text('Delete'),
+            ),
+          ],
+        );
+      },
+    );
   }
 
   @override
   Widget build(BuildContext context) {
-    // Custom Teal color to match your screenshot
-    const primaryTeal = Color(0xFF00796B); 
+    const primaryTeal = Color(0xFF00796B);
 
-    // Safely cast property to Map to avoid NoSuchMethod errors
-    final Map<String, dynamic> prop = property is Map ? property : {};
+    final Map<String, dynamic> prop = widget.property is Map ? widget.property : {};
 
-    // Extracting nested values safely
     final double budget = (prop['pricing']?['budget'] ?? 0).toDouble();
     final String propertyName = prop['propertyName']?.toString() ?? 'Property Details';
     final String propertyType = prop['propertyType']?.toString() ?? '';
     final String propertyId = prop['propertyId']?.toString() ?? 'N/A';
     final String bhk = prop['specifications']?['bhk']?.toString() ?? '0';
-    
-    // Safely extract location
+
     final Map<String, dynamic>? loc = prop['location'];
-    final String locationDisplay = loc != null && loc['city'] != null 
-        ? '${loc['area'] ?? ''}, ${loc['city']}'.trim() 
+    final String locationDisplay = loc != null && loc['city'] != null
+        ? '${loc['area'] ?? ''}, ${loc['city']}'.trim()
         : 'Kannur';
+
+    List<String> images = (prop['allImagePaths'] as List<dynamic>?)?.map((e) => e.toString()).toList() ?? [];
+    if (images.isEmpty && prop['coverImagePath'] != null) {
+      images.add(prop['coverImagePath']);
+    }
 
     return Scaffold(
       backgroundColor: Colors.grey.shade50,
@@ -55,29 +124,98 @@ class PropertyDetailScreen extends StatelessWidget {
           style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
         ),
         actions: [
-          IconButton(icon: const Icon(Icons.favorite_border, color: Colors.black54), onPressed: () {}),
-          IconButton(icon: const Icon(Icons.language, color: primaryTeal), onPressed: () {}),
-          IconButton(icon: const Icon(Icons.share_outlined, color: Colors.black54), onPressed: () {}),
-          IconButton(icon: const Icon(Icons.more_vert, color: Colors.black54), onPressed: () {}),
+          IconButton(
+            icon: const Icon(Icons.language, color: primaryTeal),
+            onPressed: () {},
+          ),
+          IconButton(
+            icon: const Icon(Icons.share_outlined, color: Colors.black54),
+            onPressed: () {},
+          ),
+          // NEW DELETE BUTTON
+          IconButton(
+            icon: const Icon(Icons.delete_outline, color: Colors.redAccent),
+            onPressed: () => _confirmDelete(context, propertyId),
+          ),
         ],
       ),
       body: SingleChildScrollView(
-        padding: const EdgeInsets.all(16.0),
         child: Column(
           children: [
-            _buildHeaderCard(primaryTeal, budget, propertyName, bhk, propertyType),
-            const SizedBox(height: 16),
+            _buildImageGallery(images),
             
-            _buildInformationCard(primaryTeal, prop, propertyId, propertyType, bhk),
-            const SizedBox(height: 16),
-            
-            _buildContactCard(primaryTeal),
-            const SizedBox(height: 16),
-            
-            _buildLocationCard(primaryTeal, locationDisplay),
-            const SizedBox(height: 32),
+            Padding(
+              padding: const EdgeInsets.all(16.0),
+              child: Column(
+                children: [
+                  _buildHeaderCard(primaryTeal, budget, propertyName, bhk, propertyType),
+                  const SizedBox(height: 16),
+                  
+                  _buildInformationCard(primaryTeal, prop, propertyId, propertyType, bhk),
+                  const SizedBox(height: 16),
+                  
+                  _buildContactCard(primaryTeal),
+                  const SizedBox(height: 16),
+                  
+                  _buildLocationCard(primaryTeal, locationDisplay),
+                  const SizedBox(height: 32),
+                ],
+              ),
+            ),
           ],
         ),
+      ),
+    );
+  }
+
+  Widget _buildImageGallery(List<String> images) {
+    if (images.isEmpty) {
+      return AspectRatio(
+        aspectRatio: 4 / 5, 
+        child: Container(
+          width: double.infinity,
+          color: Colors.grey.shade200,
+          child: const Icon(Icons.image, size: 64, color: Colors.grey),
+        ),
+      );
+    }
+
+    return AspectRatio(
+      aspectRatio: 4 / 5,
+      child: Stack(
+        children: [
+          PageView.builder(
+            itemCount: images.length,
+            onPageChanged: (index) {
+              setState(() {
+                _currentImageIndex = index;
+              });
+            },
+            itemBuilder: (context, index) {
+              return Image.file(
+                File(images[index]),
+                fit: BoxFit.cover,
+                width: double.infinity,
+              );
+            },
+          ),
+          if (images.length > 1)
+            Positioned(
+              bottom: 16,
+              right: 16,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                decoration: BoxDecoration(
+                  color: Colors.black.withOpacity(0.7),
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: Text(
+                  '${_currentImageIndex + 1} / ${images.length}',
+                  style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12),
+                ),
+              ),
+            ),
+        ],
       ),
     );
   }
@@ -96,11 +234,7 @@ class PropertyDetailScreen extends StatelessWidget {
         children: [
           Text(
             _formatCurrency(budget),
-            style: TextStyle(
-              fontSize: 28,
-              fontWeight: FontWeight.w900,
-              color: primaryColor,
-            ),
+            style: TextStyle(fontSize: 28, fontWeight: FontWeight.w900, color: primaryColor),
           ),
           const SizedBox(height: 4),
           Text(
@@ -137,10 +271,7 @@ class PropertyDetailScreen extends StatelessWidget {
             children: [
               Icon(Icons.info_outline, color: primaryColor, size: 20),
               const SizedBox(width: 10),
-              const Text(
-                'Property Information',
-                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-              ),
+              const Text('Property Information', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
             ],
           ),
           const SizedBox(height: 24),
@@ -193,10 +324,7 @@ class PropertyDetailScreen extends StatelessWidget {
             children: [
               Icon(Icons.person_outline, color: primaryColor, size: 20),
               const SizedBox(width: 10),
-              const Text(
-                'Contact Information',
-                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-              ),
+              const Text('Contact Information', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
             ],
           ),
           const SizedBox(height: 20),
@@ -215,10 +343,7 @@ class PropertyDetailScreen extends StatelessWidget {
           const SizedBox(height: 12),
           Row(
             children: [
-              Text(
-                '9563421846',
-                style: TextStyle(color: primaryColor, fontWeight: FontWeight.bold, fontSize: 16),
-              ),
+              Text('9563421846', style: TextStyle(color: primaryColor, fontWeight: FontWeight.bold, fontSize: 16)),
               const SizedBox(width: 4),
               Icon(Icons.keyboard_arrow_down, color: primaryColor, size: 20),
             ],
@@ -244,17 +369,11 @@ class PropertyDetailScreen extends StatelessWidget {
             children: [
               Icon(Icons.location_on_outlined, color: primaryColor, size: 20),
               const SizedBox(width: 10),
-              const Text(
-                'Location',
-                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-              ),
+              const Text('Location', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
             ],
           ),
           const SizedBox(height: 20),
-          Text(
-            locationDisplay,
-            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
-          ),
+          Text(locationDisplay, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
           const SizedBox(height: 8),
           const Text(
             'Address details fetched from saved data.',
@@ -265,7 +384,6 @@ class PropertyDetailScreen extends StatelessWidget {
     );
   }
 
-  // Helper Widget for the key-value rows
   Widget _buildInfoRow(String label, String value, {String? suffix}) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 4.0),
@@ -303,12 +421,7 @@ class PropertyDetailScreen extends StatelessWidget {
     );
   }
 
-  // Helper for the faint divider lines
   Widget _buildDivider() {
-    return Divider(
-      height: 24,
-      thickness: 1,
-      color: Colors.grey.shade100,
-    );
+    return Divider(height: 24, thickness: 1, color: Colors.grey.shade100);
   }
 }
