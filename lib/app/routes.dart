@@ -1,11 +1,9 @@
+import 'dart:ui';
 import 'package:flutter/material.dart';
+
 import '../features/properties/screens/properties_screen.dart';
 import '../features/requirements/screens/requirements_screen.dart';
 import '../features/account/screens/account_screen.dart';
-
-//// ============================================================================
-// CORE NAVIGATION & MAIN SCREENS (lib/app/routes.dart)
-// ============================================================================
 
 class MainNavigationScreen extends StatefulWidget {
   const MainNavigationScreen({super.key});
@@ -25,45 +23,65 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final screenWidth = MediaQuery.of(context).size.width;
+
     return Scaffold(
-      // extendBody makes the content scroll BEHIND the floating bar
       extendBody: true,
       body: _pages[_currentIndex],
 
       bottomNavigationBar: SafeArea(
         child: Padding(
-          padding: const EdgeInsets.only(left: 24.0, right: 24.0, bottom: 20.0),
-          child: Container(
-            height: 65,
-            padding: const EdgeInsets.symmetric(horizontal: 12),
-            decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(40), // Pill shape
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withOpacity(0.08),
-                  blurRadius: 24,
-                  offset: const Offset(0, 8),
+          padding: const EdgeInsets.only(bottom: 14, left: 12, right: 12),
+          child: Align(
+            alignment: Alignment.bottomCenter,
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(40),
+              child: BackdropFilter(
+                filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
+                child: Container(
+                  width: (screenWidth * 0.58).clamp(200.0, 270.0),
+                  height: 58,
+                  padding: const EdgeInsets.symmetric(horizontal: 6),
+                  decoration: BoxDecoration(
+                    color: const Color.fromARGB(255, 177, 177, 177).withValues(alpha: 0.48),
+                    borderRadius: BorderRadius.circular(40),
+                    border: Border.all(
+                      color: const Color.fromARGB(255, 230, 230, 230).withValues(alpha: 0.28),
+                      width: 1,
+                    ),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: 0.10),
+                        blurRadius: 18,
+                        offset: const Offset(0, 6),
+                      ),
+                    ],
+                  ),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      _buildNavItem(
+                        0,
+                        Icons.real_estate_agent_outlined,
+                        Icons.real_estate_agent,
+                        'Properties',
+                      ),
+                      _buildNavItem(
+                        1,
+                        Icons.assignment_outlined,
+                        Icons.assignment,
+                        'Reqs',
+                      ),
+                      _buildNavItem(
+                        2,
+                        Icons.person_outline,
+                        Icons.person,
+                        'Account',
+                      ),
+                    ],
+                  ),
                 ),
-              ],
-            ),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                _buildNavItem(
-                  0,
-                  Icons.real_estate_agent_outlined,
-                  Icons.real_estate_agent,
-                  'Properties',
-                ),
-                _buildNavItem(
-                  1,
-                  Icons.assignment_outlined,
-                  Icons.assignment,
-                  'Reqs',
-                ),
-                _buildNavItem(2, Icons.person_outline, Icons.person, 'Account'),
-              ],
+              ),
             ),
           ),
         ),
@@ -71,7 +89,6 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
     );
   }
 
-  // Helper method for the animated icons
   Widget _buildNavItem(
     int index,
     IconData unselectedIcon,
@@ -79,7 +96,6 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
     String label,
   ) {
     final isSelected = _currentIndex == index;
-    final primaryColor = Theme.of(context).colorScheme.primary;
 
     return GestureDetector(
       onTap: () {
@@ -89,41 +105,21 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
       },
       behavior: HitTestBehavior.opaque,
       child: AnimatedContainer(
-        duration: const Duration(milliseconds: 300),
-        curve: Curves.easeOutQuint,
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        duration: const Duration(milliseconds: 280),
+        curve: Curves.easeOutCubic,
+        width: 48,
+        height: 44,
+        alignment: Alignment.center,
         decoration: BoxDecoration(
           color: isSelected
-              ? primaryColor.withOpacity(0.1)
+              ? Colors.white.withValues(alpha: 0.15)
               : Colors.transparent,
           borderRadius: BorderRadius.circular(30),
         ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(
-              isSelected ? selectedIcon : unselectedIcon,
-              color: isSelected ? primaryColor : Colors.grey.shade500,
-              size: 26,
-            ),
-            AnimatedSize(
-              duration: const Duration(milliseconds: 300),
-              curve: Curves.easeOutQuint,
-              child: isSelected
-                  ? Padding(
-                      padding: const EdgeInsets.only(left: 8.0),
-                      child: Text(
-                        label,
-                        style: TextStyle(
-                          color: primaryColor,
-                          fontWeight: FontWeight.bold,
-                          fontSize: 14,
-                        ),
-                      ),
-                    )
-                  : const SizedBox.shrink(),
-            ),
-          ],
+        child: Icon(
+          isSelected ? selectedIcon : unselectedIcon,
+          color: Colors.white.withValues(alpha: isSelected ? 1.0 : 0.72),
+          size: 25,
         ),
       ),
     );
