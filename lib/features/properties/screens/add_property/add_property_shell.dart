@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:image_cropper/image_cropper.dart';
+import 'package:video_player/video_player.dart';
 import 'package:flutter/services.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:geocoding/geocoding.dart' as geocoding;
@@ -18,12 +19,19 @@ class PropertyDraftProvider extends ChangeNotifier {
           ? Property()
           : Property.fromJson(existingProperty.toJson()) {
     imagePaths = List<String>.from(draft.images);
+    videoPaths = List<String>.from(draft.videos);
   }
 
   Property draft;
   int currentStep = 0;
   bool isSaving = false;
+  static const int maxImages = 10;
+  static const int maxVideos = 5;
+  static const Duration maxVideoDuration = Duration(minutes: 5);
+
   List<String> imagePaths = [];
+  List<String> videoPaths = [];
+  bool isPickingVideo = false;
 
   final ImagePicker _picker = ImagePicker();
 
@@ -58,12 +66,12 @@ class PropertyDraftProvider extends ChangeNotifier {
 
   Future<void> pickImages() async {
     try {
+      if (imagePaths.length >= maxImages) return;
       final images = await _picker.pickMultiImage(imageQuality: 80);
       if (images.isEmpty) return;
 
-      for (final img in images) {
-        if (imagePaths.length >= 5) break;
-
+      final remainingSlots = maxImages - imagePaths.length;
+      for (final img in images.take(remainingSlots)) {
         final croppedFile = await ImageCropper().cropImage(
           sourcePath: img.path,
           aspectRatio: const CropAspectRatio(ratioX: 4, ratioY: 5),
@@ -97,6 +105,66 @@ class PropertyDraftProvider extends ChangeNotifier {
     }
   }
 
+  Future<void> pickVideo(BuildContext context) async {
+    if (isPickingVideo || videoPaths.length >= maxVideos) return;
+
+    isPickingVideo = true;
+    notifyListeners();
+
+    try {
+      final selected = await _picker.pickVideo(source: ImageSource.gallery);
+      if (selected == null) return;
+
+      final controller = VideoPlayerController.file(File(selected.path));
+      try {
+        await controller.initialize();
+        final duration = controller.value.duration;
+        if (duration > maxVideoDuration) {
+          if (context.mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('Video must be 5 minutes or shorter.'),
+              ),
+            );
+          }
+          return;
+        }
+      } finally {
+        await controller.dispose();
+      }
+
+      if (videoPaths.length >= maxVideos) {
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Maximum 5 videos allowed.')),
+          );
+        }
+        return;
+      }
+
+      videoPaths.add(selected.path);
+      draft.videos = List<String>.from(videoPaths);
+      notifyListeners();
+    } catch (error) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Could not select video: $error')),
+        );
+      }
+    } finally {
+      isPickingVideo = false;
+      notifyListeners();
+    }
+  }
+
+  void removeVideo(int index) {
+    if (index >= 0 && index < videoPaths.length) {
+      videoPaths.removeAt(index);
+      draft.videos = List<String>.from(videoPaths);
+      notifyListeners();
+    }
+  }
+
   Future<String?> saveToDrive() async {
     isSaving = true;
     notifyListeners();
@@ -116,6 +184,8 @@ class PropertyDraftProvider extends ChangeNotifier {
       }
 
       draft.propertyName = draft.propertyName.trim();
+      draft.images = List<String>.from(imagePaths);
+      draft.videos = List<String>.from(videoPaths);
       await storageService.saveProperty(draft, imagePaths: imagePaths);
       await appState.loadProperties();
       return null;
@@ -635,12 +705,143 @@ class Step1Basic extends StatelessWidget {
   }
 }
 
-class Step2Pricing extends StatelessWidget {
+class Step2Pricing extends StatefulWidget {
   final PropertyDraftProvider provider;
+
   const Step2Pricing({super.key, required this.provider});
 
   @override
+  State<Step2Pricing> createState() => _Step2PricingState();
+}
+
+class _Step2PricingState extends State<Step2Pricing> {
+  static const Map<String, double> _units = {
+    'Crore': 10000000,
+    'Lakh': 100000,
+    'Thousand': 1000,
+    'Rupees': 1,
+  };
+
+  late final TextEditingController _amountController;
+  String _selectedUnit = 'Crore';
+
+  @override
+  void initState() {
+    super.initState();
+
+    final budget = widget.provider.draft.budget;
+
+    if (budget > 0) {
+      if (budget >= 10000000) {
+        _selectedUnit = 'Crore';
+      } else if (budget >= 100000) {
+        _selectedUnit = 'Lakh';
+      } else if (budget >= 1000) {
+        _selectedUnit = 'Thousand';
+      } else {
+        _selectedUnit = 'Rupees';
+      }
+    }
+
+    _amountController = TextEditingController(
+      text: budget > 0
+          ? _formatInputNumber(budget / _units[_selectedUnit]!)
+          : '',
+    );
+  }
+
+  @override
+  void dispose() {
+    _amountController.dispose();
+    super.dispose();
+  }
+
+  String _formatInputNumber(double value) {
+    if (value == value.roundToDouble()) {
+      return value.toInt().toString();
+    }
+
+    return value
+        .toStringAsFixed(4)
+        .replaceFirst(RegExp(r'0+$'), '')
+        .replaceFirst(RegExp(r'\.$'), '');
+  }
+
+  String _formatIndianAmount(double value) {
+    final rounded = value.round();
+    final digits = rounded.toString();
+
+    if (digits.length <= 3) return digits;
+
+    final lastThree = digits.substring(digits.length - 3);
+    var remaining = digits.substring(0, digits.length - 3);
+    final groups = <String>[];
+
+    while (remaining.length > 2) {
+      groups.insert(0, remaining.substring(remaining.length - 2));
+      remaining = remaining.substring(0, remaining.length - 2);
+    }
+
+    if (remaining.isNotEmpty) {
+      groups.insert(0, remaining);
+    }
+
+    return '${groups.join(',')},$lastThree';
+  }
+
+  String _readableAmount(double rupees) {
+    if (rupees >= 10000000) {
+      return '₹${_formatInputNumber(rupees / 10000000)} Crore';
+    }
+
+    if (rupees >= 100000) {
+      return '₹${_formatInputNumber(rupees / 100000)} Lakh';
+    }
+
+    if (rupees >= 1000) {
+      return '₹${_formatInputNumber(rupees / 1000)} Thousand';
+    }
+
+    return '₹${_formatIndianAmount(rupees)}';
+  }
+
+  void _updateBudget(String value) {
+    final enteredAmount = double.tryParse(value.trim()) ?? 0;
+    final rupees = enteredAmount * _units[_selectedUnit]!;
+
+    widget.provider.updateDraft((draft) {
+      draft.budget = rupees;
+    });
+
+    setState(() {});
+  }
+
+  void _changeUnit(String? unit) {
+    if (unit == null || unit == _selectedUnit) return;
+
+    final enteredAmount = double.tryParse(_amountController.text.trim()) ?? 0;
+    final rupees = enteredAmount * _units[_selectedUnit]!;
+
+    setState(() {
+      _selectedUnit = unit;
+      _amountController.text = rupees > 0
+          ? _formatInputNumber(rupees / _units[unit]!)
+          : '';
+      _amountController.selection = TextSelection.collapsed(
+        offset: _amountController.text.length,
+      );
+    });
+
+    widget.provider.updateDraft((draft) {
+      draft.budget = rupees;
+    });
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final provider = widget.provider;
+    final budget = provider.draft.budget;
+
     return ListView(
       padding: const EdgeInsets.all(20),
       children: [
@@ -649,18 +850,87 @@ class Step2Pricing extends StatelessWidget {
           subtitle: 'Enter the total expected selling price.',
           icon: Icons.currency_rupee,
           children: [
-            TextFormField(
-              initialValue: provider.draft.budget > 0
-                  ? provider.draft.budget.toStringAsFixed(0)
-                  : '',
-              decoration: const InputDecoration(
-                labelText: 'Total Budget (₹) *',
-                prefixIcon: Icon(Icons.currency_rupee),
-                hintText: 'Enter amount',
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(
+                  flex: 3,
+                  child: TextFormField(
+                    controller: _amountController,
+                    decoration: const InputDecoration(
+                      labelText: 'Total Budget *',
+                      prefixIcon: Icon(Icons.currency_rupee),
+                      hintText: 'e.g. 2.5',
+                    ),
+                    keyboardType: const TextInputType.numberWithOptions(
+                      decimal: true,
+                    ),
+                    inputFormatters: [
+                      FilteringTextInputFormatter.allow(
+                        RegExp(r'^\d*\.?\d{0,4}'),
+                      ),
+                    ],
+                    onChanged: _updateBudget,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  flex: 2,
+                  child: DropdownButtonFormField<String>(
+                    value: _selectedUnit,
+                    isExpanded: true,
+                    decoration: const InputDecoration(labelText: 'Unit'),
+                    items: _units.keys.map((unit) {
+                      return DropdownMenuItem<String>(
+                        value: unit,
+                        child: Text(unit),
+                      );
+                    }).toList(),
+                    onChanged: _changeUnit,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                color: const Color(0xFFEAF0FF),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: const Color(0xFFD5DDF1)),
               ),
-              keyboardType: TextInputType.number,
-              onChanged: (val) => provider.updateDraft(
-                (d) => d.budget = double.tryParse(val) ?? 0.0,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'FULL AMOUNT',
+                    style: TextStyle(
+                      color: Color(0xFF6B7280),
+                      fontSize: 11,
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: 0.6,
+                    ),
+                  ),
+                  const SizedBox(height: 5),
+                  Text(
+                    '₹${_formatIndianAmount(budget)}',
+                    style: const TextStyle(
+                      color: Color(0xFF1E3A8A),
+                      fontSize: 20,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                  const SizedBox(height: 5),
+                  Text(
+                    budget > 0 ? _readableAmount(budget) : 'Enter an amount',
+                    style: const TextStyle(
+                      color: Color(0xFF4B5563),
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ],
               ),
             ),
             const SizedBox(height: 8),
@@ -688,6 +958,9 @@ class Step2Pricing extends StatelessWidget {
               children: [
                 Expanded(
                   child: TextFormField(
+                    key: ValueKey(
+                      'land_area_${provider.draft.propertyId ?? 'new'}',
+                    ),
                     initialValue: provider.draft.landArea?.toString(),
                     decoration: const InputDecoration(
                       labelText: 'Land Area',
@@ -704,6 +977,9 @@ class Step2Pricing extends StatelessWidget {
                 const SizedBox(width: 12),
                 Expanded(
                   child: TextFormField(
+                    key: ValueKey(
+                      'built_area_${provider.draft.propertyId ?? 'new'}',
+                    ),
                     initialValue: provider.draft.builtUpArea?.toString(),
                     decoration: const InputDecoration(
                       labelText: 'Built-up Area',
@@ -851,11 +1127,14 @@ class Step4Media extends StatelessWidget {
       children: [
         _FormSectionCard(
           title: 'Property Photos',
-          subtitle: 'Choose up to five images. Each image is cropped to 4:5.',
+          subtitle: 'Choose up to 10 images. Each image is cropped to 4:5.',
           icon: Icons.photo_library_outlined,
           children: [
             InkWell(
-              onTap: provider.pickImages,
+              onTap:
+                  provider.imagePaths.length >= PropertyDraftProvider.maxImages
+                  ? null
+                  : provider.pickImages,
               borderRadius: BorderRadius.circular(16),
               child: Container(
                 width: double.infinity,
@@ -888,7 +1167,7 @@ class Step4Media extends StatelessWidget {
                     ),
                     SizedBox(height: 5),
                     Text(
-                      'Maximum 5 photos · Portrait 4:5',
+                      'Maximum 10 photos · Portrait 4:5',
                       style: TextStyle(color: Color(0xFF6B7280), fontSize: 12),
                     ),
                   ],
@@ -947,6 +1226,129 @@ class Step4Media extends StatelessWidget {
                   );
                 }),
               ),
+            ],
+          ],
+        ),
+        const SizedBox(height: 16),
+        _FormSectionCard(
+          title: 'Property Videos',
+          subtitle: 'Add up to 5 videos, each no longer than 5 minutes.',
+          icon: Icons.video_library_outlined,
+          children: [
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                onPressed:
+                    provider.isPickingVideo ||
+                        provider.videoPaths.length >=
+                            PropertyDraftProvider.maxVideos
+                    ? null
+                    : () => provider.pickVideo(context),
+                icon: provider.isPickingVideo
+                    ? const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.video_call_outlined),
+                label: Text(
+                  provider.isPickingVideo
+                      ? 'Checking video…'
+                      : 'Select Video (${provider.videoPaths.length}/${PropertyDraftProvider.maxVideos})',
+                ),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: const Color(0xFF1E3A8A),
+                  padding: const EdgeInsets.symmetric(vertical: 15),
+                  side: const BorderSide(color: Color(0xFFD5DDF1)),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(13),
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(height: 8),
+            const Text(
+              'Supported videos are selected from your gallery. Videos longer than 5 minutes are rejected.',
+              style: TextStyle(
+                color: Color(0xFF6B7280),
+                fontSize: 12,
+                height: 1.4,
+              ),
+            ),
+            if (provider.videoPaths.isNotEmpty) ...[
+              const SizedBox(height: 12),
+              ...List.generate(provider.videoPaths.length, (index) {
+                final path = provider.videoPaths[index];
+                final file = File(path);
+                final fileName = path.split(Platform.pathSeparator).last;
+                return Container(
+                  margin: const EdgeInsets.only(bottom: 8),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 10,
+                  ),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFF7F8FC),
+                    border: Border.all(color: const Color(0xFFE9ECF3)),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Row(
+                    children: [
+                      Container(
+                        width: 44,
+                        height: 44,
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFEAF0FF),
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: const Icon(
+                          Icons.play_circle_outline_rounded,
+                          color: Color(0xFF1E3A8A),
+                          size: 27,
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              fileName,
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                color: Color(0xFF172033),
+                                fontSize: 13,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                            const SizedBox(height: 3),
+                            Text(
+                              file.existsSync()
+                                  ? 'Video ready'
+                                  : 'File not found',
+                              style: TextStyle(
+                                color: file.existsSync()
+                                    ? const Color(0xFF15803D)
+                                    : Colors.red,
+                                fontSize: 11,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      IconButton(
+                        tooltip: 'Remove video',
+                        onPressed: () => provider.removeVideo(index),
+                        icon: const Icon(
+                          Icons.delete_outline,
+                          color: Colors.red,
+                        ),
+                      ),
+                    ],
+                  ),
+                );
+              }),
             ],
           ],
         ),
@@ -1014,7 +1416,6 @@ class Step4Media extends StatelessWidget {
 
 class Step5Location extends StatefulWidget {
   final PropertyDraftProvider provider;
-
   const Step5Location({super.key, required this.provider});
 
   @override
@@ -1023,19 +1424,15 @@ class Step5Location extends StatefulWidget {
 
 class _Step5LocationState extends State<Step5Location> {
   bool _isFetchingLocation = false;
-
-  // geocoding 5.0.0 requires an instance of Geocoding.
-  final geocoding.Geocoding _geocoding = geocoding.Geocoding();
-
   late final TextEditingController _stateController;
   late final TextEditingController _cityController;
   late final TextEditingController _areaController;
   late final TextEditingController _pincodeController;
+  final geocoding.Geocoding _geocoding = geocoding.Geocoding();
 
   @override
   void initState() {
     super.initState();
-
     _stateController = TextEditingController(text: widget.provider.draft.state);
     _cityController = TextEditingController(text: widget.provider.draft.city);
     _areaController = TextEditingController(text: widget.provider.draft.area);
@@ -1055,12 +1452,10 @@ class _Step5LocationState extends State<Step5Location> {
 
   Future<void> _fetchCurrentLocation() async {
     if (_isFetchingLocation) return;
-
     setState(() => _isFetchingLocation = true);
 
     try {
       final serviceEnabled = await Geolocator.isLocationServiceEnabled();
-
       if (!serviceEnabled) {
         throw Exception(
           'Location is turned off. Please enable GPS and try again.',
@@ -1068,17 +1463,14 @@ class _Step5LocationState extends State<Step5Location> {
       }
 
       var permission = await Geolocator.checkPermission();
-
       if (permission == LocationPermission.denied) {
         permission = await Geolocator.requestPermission();
       }
-
       if (permission == LocationPermission.denied) {
         throw Exception(
           'Location permission was denied. Please allow location access.',
         );
       }
-
       if (permission == LocationPermission.deniedForever) {
         throw Exception(
           'Location permission is permanently denied. Enable it in app settings.',
@@ -1091,8 +1483,6 @@ class _Step5LocationState extends State<Step5Location> {
           timeLimit: Duration(seconds: 20),
         ),
       );
-
-      // Correct API for geocoding 5.0.0.
       final placemarks = await _geocoding.placemarkFromCoordinates(
         position.latitude,
         position.longitude,
@@ -1100,70 +1490,54 @@ class _Step5LocationState extends State<Step5Location> {
 
       if (placemarks.isEmpty) {
         throw Exception(
-          'No address was found for your current GPS location. Please enter it manually.',
+          'Coordinates found, but the address could not be identified. Please enter it manually.',
         );
       }
 
       final place = placemarks.first;
-
       final stateName = (place.administrativeArea ?? '').trim();
-
-      final subDistrict = (place.subAdministrativeArea ?? '').trim();
-
-      final locality = (place.locality ?? '').trim();
-
-      final subLocality = (place.subLocality ?? '').trim();
-
-      final cityName = subDistrict.isNotEmpty
-          ? subDistrict
-          : locality.isNotEmpty
-          ? locality
-          : subLocality;
-
-      final areaName =
-          <String>[
-                place.subLocality ?? '',
-                place.thoroughfare ?? '',
-                place.name ?? '',
-              ]
-              .map((value) => value.trim())
-              .where((value) => value.isNotEmpty)
-              .toSet()
-              .join(', ');
-
+      final cityName = (place.subAdministrativeArea?.trim().isNotEmpty == true)
+          ? place.subAdministrativeArea!.trim()
+          : (place.locality ?? place.subLocality ?? '').trim();
+      final areaName = [place.subLocality, place.thoroughfare, place.name]
+          .whereType<String>()
+          .map((value) => value.trim())
+          .where((value) => value.isNotEmpty)
+          .toSet()
+          .join(', ');
       final postalCode = (place.postalCode ?? '').trim();
 
       widget.provider.updateDraft((draft) {
-        if (stateName.isNotEmpty) {
-          draft.state = stateName;
-        }
-        if (cityName.isNotEmpty) {
-          draft.city = cityName;
-        }
-        if (areaName.isNotEmpty) {
-          draft.area = areaName;
-        }
-        if (postalCode.isNotEmpty) {
-          draft.pincode = postalCode;
-        }
+        if (stateName.isNotEmpty) draft.state = stateName;
+        if (cityName.isNotEmpty) draft.city = cityName;
+        if (areaName.isNotEmpty) draft.area = areaName;
+        if (postalCode.isNotEmpty) draft.pincode = postalCode;
       });
-
-      _stateController.text = widget.provider.draft.state;
-      _cityController.text = widget.provider.draft.city;
-      _areaController.text = widget.provider.draft.area;
-      _pincodeController.text = widget.provider.draft.pincode;
+      _stateController.text = stateName.isNotEmpty
+          ? stateName
+          : widget.provider.draft.state;
+      _cityController.text = cityName.isNotEmpty
+          ? cityName
+          : widget.provider.draft.city;
+      _areaController.text = areaName.isNotEmpty
+          ? areaName
+          : widget.provider.draft.area;
+      _pincodeController.text = postalCode.isNotEmpty
+          ? postalCode
+          : widget.provider.draft.pincode;
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('GPS location fetched. Please verify the address.'),
+            content: Text(
+              'Current location fetched successfully. Please verify the address.',
+            ),
           ),
         );
       }
     } catch (error) {
       if (mounted) {
         final message = error.toString().replaceFirst('Exception: ', '');
-
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(message),
@@ -1172,16 +1546,13 @@ class _Step5LocationState extends State<Step5Location> {
         );
       }
     } finally {
-      if (mounted) {
-        setState(() => _isFetchingLocation = false);
-      }
+      if (mounted) setState(() => _isFetchingLocation = false);
     }
   }
 
   @override
   Widget build(BuildContext context) {
     final provider = widget.provider;
-
     return ListView(
       padding: const EdgeInsets.all(20),
       children: [
@@ -1215,7 +1586,7 @@ class _Step5LocationState extends State<Step5Location> {
             ),
             const SizedBox(height: 12),
             const Text(
-              'GPS detects this device’s location, which may differ from the property location. Verify the details or enter the property address manually.',
+              'GPS uses this device’s current location, which may differ from the property location. Verify the details or enter the property address manually.',
               style: TextStyle(
                 color: Color(0xFF6B7280),
                 fontSize: 12,
@@ -1249,8 +1620,7 @@ class _Step5LocationState extends State<Step5Location> {
                 labelText: 'State',
                 prefixIcon: Icon(Icons.map_outlined),
               ),
-              onChanged: (value) =>
-                  provider.updateDraft((d) => d.state = value),
+              onChanged: (val) => provider.updateDraft((d) => d.state = val),
             ),
             const SizedBox(height: 16),
             TextFormField(
@@ -1259,7 +1629,7 @@ class _Step5LocationState extends State<Step5Location> {
                 labelText: 'City / District',
                 prefixIcon: Icon(Icons.location_city_outlined),
               ),
-              onChanged: (value) => provider.updateDraft((d) => d.city = value),
+              onChanged: (val) => provider.updateDraft((d) => d.city = val),
             ),
             const SizedBox(height: 16),
             TextFormField(
@@ -1268,7 +1638,7 @@ class _Step5LocationState extends State<Step5Location> {
                 labelText: 'Area / Locality',
                 prefixIcon: Icon(Icons.place_outlined),
               ),
-              onChanged: (value) => provider.updateDraft((d) => d.area = value),
+              onChanged: (val) => provider.updateDraft((d) => d.area = val),
             ),
             const SizedBox(height: 16),
             TextFormField(
@@ -1282,8 +1652,7 @@ class _Step5LocationState extends State<Step5Location> {
                 FilteringTextInputFormatter.digitsOnly,
                 LengthLimitingTextInputFormatter(6),
               ],
-              onChanged: (value) =>
-                  provider.updateDraft((d) => d.pincode = value),
+              onChanged: (val) => provider.updateDraft((d) => d.pincode = val),
             ),
           ],
         ),
@@ -1332,6 +1701,7 @@ class Step6Review extends StatelessWidget {
             }),
             _reviewSection(context, 'Media & Notes', 3, {
               'Images': '${provider.imagePaths.length} selected',
+              'Videos': '${provider.videoPaths.length} selected',
               'Notes': d.manualNotes,
               'AI Notes': d.aiGeneratedNotes,
             }),

@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:video_player/video_player.dart';
 
 import '../../../core/services/storage_service.dart';
 import '../../../data/models/property_model.dart';
@@ -34,10 +35,12 @@ class _PropertyDetailScreenState extends State<PropertyDetailScreen> {
   }
 
   String _formatCurrency(double amount) {
-    if (amount >= 10000000)
+    if (amount >= 10000000) {
       return '₹${(amount / 10000000).toStringAsFixed(2)} Cr';
-    if (amount >= 100000)
+    }
+    if (amount >= 100000) {
       return '₹${(amount / 100000).toStringAsFixed(0)} Lakhs';
+    }
     return '₹${amount.toStringAsFixed(0)}';
   }
 
@@ -49,16 +52,29 @@ class _PropertyDetailScreenState extends State<PropertyDetailScreen> {
   List<String> _getImages(Map<String, dynamic> prop) {
     final images = <String>[];
     final dynamic allImages = prop['allImagePaths'] ?? prop['images'];
+
     if (allImages is List) {
       images.addAll(
         allImages.map((e) => e.toString()).where((e) => e.isNotEmpty),
       );
     }
+
     if (images.isEmpty && prop['coverImagePath'] != null) {
       final cover = prop['coverImagePath'].toString();
       if (cover.isNotEmpty) images.add(cover);
     }
+
     return images;
+  }
+
+  List<String> _getVideos(Map<String, dynamic> prop) {
+    final dynamic rawVideos = prop['videos'];
+    if (rawVideos is! List) return [];
+
+    return rawVideos
+        .map((item) => item.toString())
+        .where((path) => path.trim().isNotEmpty)
+        .toList();
   }
 
   Future<void> _editProperty(String propertyId) async {
@@ -66,18 +82,24 @@ class _PropertyDetailScreenState extends State<PropertyDetailScreen> {
       _message('Unable to edit: Property ID is missing.');
       return;
     }
+
     try {
       final model = Property.fromJson(Map<String, dynamic>.from(_propertyData));
+
       final result = await Navigator.push<bool>(
         context,
         MaterialPageRoute(
           builder: (_) => AddPropertyShell(propertyToEdit: model),
         ),
       );
+
       if (!mounted || result != true) return;
+
       await appState.loadProperties();
       final saved = await storageService.getPropertiesIndex();
+
       Map<String, dynamic>? updated;
+
       for (final item in saved) {
         final map = Map<String, dynamic>.from(item);
         if (map['propertyId']?.toString() == propertyId) {
@@ -85,7 +107,9 @@ class _PropertyDetailScreenState extends State<PropertyDetailScreen> {
           break;
         }
       }
+
       if (!mounted) return;
+
       if (updated != null) {
         setState(() {
           _propertyData = updated!;
@@ -98,7 +122,9 @@ class _PropertyDetailScreenState extends State<PropertyDetailScreen> {
         );
       }
     } catch (error) {
-      if (mounted) _message('Unable to edit property: $error', error: true);
+      if (mounted) {
+        _message('Unable to edit property: $error', error: true);
+      }
     }
   }
 
@@ -115,7 +141,8 @@ class _PropertyDetailScreenState extends State<PropertyDetailScreen> {
           ],
         ),
         content: const Text(
-          'Are you sure you want to permanently delete this property? This action cannot be undone.',
+          'Are you sure you want to permanently delete this property? '
+          'This action cannot be undone.',
         ),
         actions: [
           TextButton(
@@ -130,12 +157,17 @@ class _PropertyDetailScreenState extends State<PropertyDetailScreen> {
         ],
       ),
     );
+
     if (confirmed != true || !mounted) return;
+
     try {
       await storageService.archiveProperty(propertyId);
       await appState.loadProperties();
+
       if (!mounted) return;
+
       Navigator.pop(context);
+
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('Property deleted successfully'),
@@ -144,7 +176,9 @@ class _PropertyDetailScreenState extends State<PropertyDetailScreen> {
         ),
       );
     } catch (error) {
-      if (mounted) _message('Unable to delete property: $error', error: true);
+      if (mounted) {
+        _message('Unable to delete property: $error', error: true);
+      }
     }
   }
 
@@ -164,23 +198,32 @@ class _PropertyDetailScreenState extends State<PropertyDetailScreen> {
     final pricing = prop['pricing'];
     final specifications = prop['specifications'];
     final location = prop['location'];
+
     final budget = _toDouble(
       pricing is Map ? pricing['budget'] : prop['budget'],
     );
+
     final name = prop['propertyName']?.toString() ?? 'Property Details';
     final type = prop['propertyType']?.toString() ?? '';
     final id = prop['propertyId']?.toString() ?? 'N/A';
+
     final bhk = specifications is Map
         ? (specifications['bhk'] ?? prop['bhk'] ?? '—').toString()
         : (prop['bhk'] ?? '—').toString();
+
     final loc = location is Map ? Map<String, dynamic>.from(location) : null;
+
     final area = loc?['area']?.toString() ?? prop['area']?.toString() ?? '';
     final city = loc?['city']?.toString() ?? prop['city']?.toString() ?? '';
+
     final locationText = [
       area,
       city,
     ].where((e) => e.trim().isNotEmpty).join(', ');
+
     final images = _getImages(prop);
+    final videos = _getVideos(prop);
+
     final negotiable = pricing is Map
         ? (pricing['isNegotiable'] ?? prop['isNegotiable'] ?? true) == true
         : prop['isNegotiable'] == true;
@@ -217,7 +260,7 @@ class _PropertyDetailScreenState extends State<PropertyDetailScreen> {
       body: ListView(
         padding: const EdgeInsets.only(bottom: 28),
         children: [
-          _buildImageGallery(images),
+          _buildMediaGallery(images, videos),
           Padding(
             padding: const EdgeInsets.all(16),
             child: Column(
@@ -247,8 +290,13 @@ class _PropertyDetailScreenState extends State<PropertyDetailScreen> {
     );
   }
 
-  Widget _buildImageGallery(List<String> images) {
-    if (images.isEmpty) {
+  Widget _buildMediaGallery(List<String> images, List<String> videos) {
+    final photoPaths = images.where((path) => File(path).existsSync()).toList();
+    final videoPaths = videos.where((path) => File(path).existsSync()).toList();
+
+    final totalItems = photoPaths.length + videoPaths.length;
+
+    if (totalItems == 0) {
       return AspectRatio(
         aspectRatio: 4 / 5,
         child: Container(
@@ -263,85 +311,126 @@ class _PropertyDetailScreenState extends State<PropertyDetailScreen> {
         ),
       );
     }
-    if (_currentImageIndex >= images.length) _currentImageIndex = 0;
+
+    final safeIndex = _currentImageIndex.clamp(0, totalItems - 1);
+
     return AspectRatio(
       aspectRatio: 4 / 5,
       child: Stack(
         children: [
           PageView.builder(
-            itemCount: images.length,
-            onPageChanged: (index) =>
-                setState(() => _currentImageIndex = index),
-            itemBuilder: (context, index) => Image.file(
-              File(images[index]),
-              fit: BoxFit.cover,
-              width: double.infinity,
-              errorBuilder: (_, __, ___) => Container(
-                color: const Color(0xFFE9ECF3),
-                child: const Center(
-                  child: Icon(
-                    Icons.broken_image_outlined,
-                    size: 60,
-                    color: Color(0xFF8791A5),
-                  ),
+            itemCount: totalItems,
+            onPageChanged: (index) {
+              setState(() => _currentImageIndex = index);
+            },
+            itemBuilder: (context, index) {
+              if (index < photoPaths.length) {
+                return Image.file(
+                  File(photoPaths[index]),
+                  fit: BoxFit.cover,
+                  width: double.infinity,
+                  errorBuilder: (_, __, ___) => _brokenImage(),
+                );
+              }
+
+              final videoIndex = index - photoPaths.length;
+              final videoPath = videoPaths[videoIndex];
+
+              return GestureDetector(
+                onTap: () {
+                  Navigator.of(context).push(
+                    MaterialPageRoute<void>(
+                      builder: (_) =>
+                          FullScreenPropertyVideo(videoPath: videoPath),
+                    ),
+                  );
+                },
+                child: _AutoPlayVideoPage(
+                  key: ValueKey(videoPath),
+                  path: videoPath,
+                  isActive: safeIndex == index,
                 ),
-              ),
-            ),
+              );
+            },
           ),
           Positioned(
             left: 16,
             top: 16,
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
-              decoration: BoxDecoration(
-                color: Colors.black.withOpacity(0.55),
-                borderRadius: BorderRadius.circular(30),
-              ),
-              child: const Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(
-                    Icons.photo_library_outlined,
-                    size: 14,
-                    color: Colors.white,
-                  ),
-                  SizedBox(width: 6),
-                  Text(
-                    'Property photos',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 12,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-          if (images.length > 1)
-            Positioned(
-              right: 16,
-              bottom: 16,
+            child: IgnorePointer(
               child: Container(
                 padding: const EdgeInsets.symmetric(
                   horizontal: 12,
                   vertical: 7,
                 ),
                 decoration: BoxDecoration(
-                  color: Colors.black.withOpacity(0.68),
+                  color: Colors.black.withValues(alpha: 0.55),
                   borderRadius: BorderRadius.circular(30),
                 ),
-                child: Text(
-                  '${_currentImageIndex + 1} / ${images.length}',
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontWeight: FontWeight.w700,
-                    fontSize: 12,
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(
+                      Icons.photo_library_outlined,
+                      size: 14,
+                      color: Colors.white,
+                    ),
+                    const SizedBox(width: 6),
+                    Text(
+                      photoPaths.isNotEmpty && videoPaths.isNotEmpty
+                          ? 'Photos & Videos'
+                          : photoPaths.isNotEmpty
+                          ? 'Property photos'
+                          : 'Property videos',
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+          if (totalItems > 1)
+            Positioned(
+              right: 16,
+              bottom: 16,
+              child: IgnorePointer(
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 7,
+                  ),
+                  decoration: BoxDecoration(
+                    color: Colors.black.withValues(alpha: 0.68),
+                    borderRadius: BorderRadius.circular(30),
+                  ),
+                  child: Text(
+                    '${safeIndex + 1} / $totalItems',
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w700,
+                      fontSize: 12,
+                    ),
                   ),
                 ),
               ),
             ),
         ],
+      ),
+    );
+  }
+
+  Widget _brokenImage() {
+    return Container(
+      color: const Color(0xFFE9ECF3),
+      child: const Center(
+        child: Icon(
+          Icons.broken_image_outlined,
+          size: 60,
+          color: Color(0xFF8791A5),
+        ),
       ),
     );
   }
@@ -449,12 +538,19 @@ class _PropertyDetailScreenState extends State<PropertyDetailScreen> {
     final pricing = prop['pricing'];
     final specifications = prop['specifications'];
     final location = prop['location'];
+
     dynamic valueFrom(String key, {dynamic fallback = '—'}) {
-      if (specifications is Map && specifications[key] != null)
+      if (prop[key] != null) return prop[key];
+      if (specifications is Map && specifications[key] != null) {
         return specifications[key];
-      if (pricing is Map && pricing[key] != null) return pricing[key];
-      if (location is Map && location[key] != null) return location[key];
-      return prop[key] ?? fallback;
+      }
+      if (pricing is Map && pricing[key] != null) {
+        return pricing[key];
+      }
+      if (location is Map && location[key] != null) {
+        return location[key];
+      }
+      return fallback;
     }
 
     final rows = <List<String>>[
@@ -477,6 +573,7 @@ class _PropertyDetailScreenState extends State<PropertyDetailScreen> {
       ['Direction', valueFrom('facing').toString()],
       ['Status', valueFrom('status', fallback: 'ACTIVE').toString()],
     ];
+
     return _card(
       Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -500,45 +597,33 @@ class _PropertyDetailScreenState extends State<PropertyDetailScreen> {
     final number = phone.trim();
 
     if (number.isEmpty || number == 'Not provided' || number == 'N/A') {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('No phone number is available for this contact.'),
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
+      _message('No phone number is available for this contact.');
       return;
     }
 
     final uri = Uri(scheme: 'tel', path: number);
+
     try {
       final launched = await launchUrl(uri);
+
       if (!launched && mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Unable to open the phone app.'),
-            behavior: SnackBarBehavior.floating,
-          ),
-        );
+        _message('Unable to open the phone app.');
       }
     } catch (_) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Unable to open the phone app.'),
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
+      if (mounted) _message('Unable to open the phone app.');
     }
   }
 
   Widget _buildContactCard(Map<String, dynamic> prop) {
     final contactName = prop['contactName']?.toString() ?? 'Not provided';
     final contactType = prop['contactType']?.toString() ?? '';
+
     final phone =
         prop['contactPhone']?.toString() ??
         prop['phoneNumber']?.toString() ??
         prop['phone']?.toString() ??
         'Not provided';
+
     return _card(
       Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -688,106 +773,598 @@ class _PropertyDetailScreenState extends State<PropertyDetailScreen> {
     );
   }
 
-  Widget _card(Widget child) => Container(
-    width: double.infinity,
-    padding: const EdgeInsets.all(18),
-    decoration: BoxDecoration(
-      color: Colors.white,
-      borderRadius: BorderRadius.circular(20),
-      border: Border.all(color: _border),
-    ),
-    child: child,
-  );
-
-  Widget _sectionTitle(IconData icon, String title, String subtitle) => Row(
-    children: [
-      Container(
-        width: 42,
-        height: 42,
-        decoration: BoxDecoration(
-          color: const Color(0xFFEAF0FF),
-          borderRadius: BorderRadius.circular(13),
-        ),
-        child: Icon(icon, color: _primary, size: 21),
+  Widget _card(Widget child) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: _border),
       ),
-      const SizedBox(width: 12),
-      Expanded(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              title,
-              style: const TextStyle(
-                fontSize: 16,
-                fontWeight: FontWeight.w800,
-                color: Color(0xFF172033),
-              ),
-            ),
-            const SizedBox(height: 3),
-            Text(
-              subtitle,
-              style: const TextStyle(fontSize: 12, color: Color(0xFF7A8498)),
-            ),
-          ],
-        ),
-      ),
-    ],
-  );
+      child: child,
+    );
+  }
 
-  Widget _chip(IconData icon, String label) => Container(
-    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
-    decoration: BoxDecoration(
-      color: const Color(0xFFF7F8FC),
-      border: Border.all(color: _border),
-      borderRadius: BorderRadius.circular(10),
-    ),
-    child: Row(
-      mainAxisSize: MainAxisSize.min,
+  Widget _sectionTitle(IconData icon, String title, String subtitle) {
+    return Row(
       children: [
-        Icon(icon, size: 15, color: _primary),
-        const SizedBox(width: 6),
-        Text(
-          label,
-          style: const TextStyle(
-            fontSize: 12,
-            color: Color(0xFF3C465B),
-            fontWeight: FontWeight.w600,
+        Container(
+          width: 42,
+          height: 42,
+          decoration: BoxDecoration(
+            color: const Color(0xFFEAF0FF),
+            borderRadius: BorderRadius.circular(13),
           ),
-        ),
-      ],
-    ),
-  );
-
-  Widget _buildInfoRow(String label, String value) => Padding(
-    padding: const EdgeInsets.symmetric(vertical: 3),
-    child: Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Expanded(
-          flex: 5,
-          child: Text(
-            label,
-            style: const TextStyle(
-              fontSize: 13,
-              color: Color(0xFF7A8498),
-              fontWeight: FontWeight.w500,
-            ),
-          ),
+          child: Icon(icon, color: _primary, size: 21),
         ),
         const SizedBox(width: 12),
         Expanded(
-          flex: 5,
-          child: Text(
-            value,
-            textAlign: TextAlign.right,
-            style: const TextStyle(
-              fontSize: 13,
-              color: Color(0xFF263248),
-              fontWeight: FontWeight.w700,
-            ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                title,
+                style: const TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w800,
+                  color: Color(0xFF172033),
+                ),
+              ),
+              const SizedBox(height: 3),
+              Text(
+                subtitle,
+                style: const TextStyle(fontSize: 12, color: Color(0xFF7A8498)),
+              ),
+            ],
           ),
         ),
       ],
-    ),
-  );
+    );
+  }
+
+  Widget _chip(IconData icon, String label) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF7F8FC),
+        border: Border.all(color: _border),
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 15, color: _primary),
+          const SizedBox(width: 6),
+          Text(
+            label,
+            style: const TextStyle(
+              fontSize: 12,
+              color: Color(0xFF3C465B),
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildInfoRow(String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 3),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Expanded(
+            flex: 5,
+            child: Text(
+              label,
+              style: const TextStyle(
+                fontSize: 13,
+                color: Color(0xFF7A8498),
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            flex: 5,
+            child: Text(
+              value,
+              textAlign: TextAlign.right,
+              style: const TextStyle(
+                fontSize: 13,
+                color: Color(0xFF263248),
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Gallery video preview. Opens the full-screen player when tapped.
+/// Automatically plays when active and pauses when another page is selected.
+class _AutoPlayVideoPage extends StatefulWidget {
+  final String path;
+  final bool isActive;
+
+  const _AutoPlayVideoPage({
+    super.key,
+    required this.path,
+    required this.isActive,
+  });
+
+  @override
+  State<_AutoPlayVideoPage> createState() => _AutoPlayVideoPageState();
+}
+
+class _AutoPlayVideoPageState extends State<_AutoPlayVideoPage> {
+  VideoPlayerController? _controller;
+  bool _initializing = false;
+  bool _muted = true;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.isActive) _initializeVideo();
+  }
+
+  @override
+  void didUpdateWidget(covariant _AutoPlayVideoPage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+
+    if (oldWidget.path != widget.path) {
+      _disposeController();
+      _error = null;
+      _initializing = false;
+
+      if (widget.isActive) _initializeVideo();
+      return;
+    }
+
+    if (oldWidget.isActive != widget.isActive) {
+      if (widget.isActive) {
+        if (_controller == null && !_initializing) {
+          _initializeVideo();
+        } else {
+          _playVideo();
+        }
+      } else {
+        _controller?.pause();
+      }
+    }
+  }
+
+  Future<void> _initializeVideo() async {
+    if (_initializing || _controller != null) return;
+
+    _initializing = true;
+
+    final controller = VideoPlayerController.file(File(widget.path));
+    _controller = controller;
+
+    try {
+      await controller.initialize();
+      await controller.setLooping(true);
+      await controller.setVolume(_muted ? 0 : 1);
+
+      if (!mounted || !identical(_controller, controller)) {
+        await controller.dispose();
+        return;
+      }
+
+      setState(() => _initializing = false);
+
+      if (widget.isActive) {
+        await controller.play();
+      }
+    } catch (_) {
+      if (!mounted || !identical(_controller, controller)) {
+        await controller.dispose();
+        return;
+      }
+
+      setState(() {
+        _initializing = false;
+        _error = 'Unable to load this video';
+      });
+    }
+  }
+
+  Future<void> _playVideo() async {
+    final controller = _controller;
+
+    if (controller == null || !controller.value.isInitialized) return;
+
+    try {
+      await controller.setVolume(_muted ? 0 : 1);
+
+      if (widget.isActive && mounted) {
+        await controller.play();
+      }
+    } catch (_) {
+      // Controller may have been disposed during a page transition.
+    }
+  }
+
+  Future<void> _toggleSound() async {
+    final controller = _controller;
+
+    if (controller == null || !controller.value.isInitialized) return;
+
+    final nextMuted = !_muted;
+    setState(() => _muted = nextMuted);
+
+    try {
+      await controller.setVolume(nextMuted ? 0 : 1);
+    } catch (_) {
+      // Ignore changes during disposal.
+    }
+  }
+
+  void _disposeController() {
+    final controller = _controller;
+    _controller = null;
+
+    if (controller != null) {
+      controller.dispose();
+    }
+  }
+
+  @override
+  void dispose() {
+    _disposeController();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final controller = _controller;
+
+    if (_error != null) {
+      return Container(
+        color: const Color(0xFF111827),
+        child: const Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                Icons.videocam_off_outlined,
+                color: Colors.white70,
+                size: 48,
+              ),
+              SizedBox(height: 12),
+              Text(
+                'Unable to load this video',
+                style: TextStyle(color: Colors.white70),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    if (_initializing ||
+        controller == null ||
+        !controller.value.isInitialized) {
+      return Container(
+        color: const Color(0xFF111827),
+        child: const Center(
+          child: CircularProgressIndicator(color: Colors.white),
+        ),
+      );
+    }
+
+    return Container(
+      color: Colors.black,
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          Center(
+            child: AspectRatio(
+              aspectRatio: controller.value.aspectRatio > 0
+                  ? controller.value.aspectRatio
+                  : 16 / 9,
+              child: VideoPlayer(controller),
+            ),
+          ),
+          // Positioned(
+          //   top: 35,
+          //   left: 16,
+          //   child: IgnorePointer(
+          //     child: Container(
+          //       padding: const EdgeInsets.symmetric(
+          //         horizontal: 10,
+          //         vertical: 6,
+          //       ),
+          //       decoration: BoxDecoration(
+          //         color: Colors.black54,
+          //         borderRadius: BorderRadius.circular(20),
+          //       ),
+          //       child: const Row(
+          //         mainAxisSize: MainAxisSize.min,
+          //         children: [
+          //           Icon(
+          //             Icons.play_circle_outline,
+          //             color: Colors.white,
+          //             size: 16,
+          //           ),
+          //           SizedBox(width: 5),
+          //           Text(
+          //             'PROPERTY VIDEO',
+          //             style: TextStyle(
+          //               color: Colors.white,
+          //               fontSize: 11,
+          //               fontWeight: FontWeight.w700,
+          //             ),
+          //           ),
+          //         ],
+          //       ),
+          //     ),
+          //   ),
+          // ),
+          Positioned(
+            left: 16,
+            bottom: 12,
+            child: IconButton.filled(
+              tooltip: _muted ? 'Turn sound on' : 'Mute video',
+              style: IconButton.styleFrom(
+                backgroundColor: Colors.black54,
+                foregroundColor: Colors.white,
+              ),
+              onPressed: _toggleSound,
+              icon: Icon(_muted ? Icons.volume_off : Icons.volume_up),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Full-screen video player with playback controls and seek bar.
+class FullScreenPropertyVideo extends StatefulWidget {
+  final String videoPath;
+
+  const FullScreenPropertyVideo({super.key, required this.videoPath});
+
+  @override
+  State<FullScreenPropertyVideo> createState() =>
+      _FullScreenPropertyVideoState();
+}
+
+class _FullScreenPropertyVideoState extends State<FullScreenPropertyVideo> {
+  late final VideoPlayerController _controller;
+
+  bool _ready = false;
+  bool _muted = true;
+  bool _showControls = true;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _initializeVideo();
+  }
+
+  Future<void> _initializeVideo() async {
+    final controller = VideoPlayerController.file(File(widget.videoPath));
+
+    _controller = controller;
+
+    try {
+      await controller.initialize();
+      await controller.setLooping(false);
+      await controller.setVolume(0);
+
+      if (!mounted) return;
+
+      setState(() => _ready = true);
+      await controller.play();
+    } catch (_) {
+      if (mounted) {
+        setState(() {
+          _error = 'Unable to load this video.';
+        });
+      }
+    }
+  }
+
+  Future<void> _togglePlayPause() async {
+    if (!_ready) return;
+
+    try {
+      if (_controller.value.isPlaying) {
+        await _controller.pause();
+      } else {
+        if (_controller.value.position >= _controller.value.duration) {
+          await _controller.seekTo(Duration.zero);
+        }
+        await _controller.play();
+      }
+
+      if (mounted) setState(() {});
+    } catch (_) {
+      // Ignore controller errors during shutdown.
+    }
+  }
+
+  Future<void> _toggleMute() async {
+    if (!_ready) return;
+
+    final nextMuted = !_muted;
+
+    try {
+      await _controller.setVolume(nextMuted ? 0 : 1);
+
+      if (mounted) {
+        setState(() => _muted = nextMuted);
+      }
+    } catch (_) {
+      // Ignore controller errors during shutdown.
+    }
+  }
+
+  String _formatDuration(Duration duration) {
+    final hours = duration.inHours;
+    final minutes = duration.inMinutes.remainder(60);
+    final seconds = duration.inSeconds.remainder(60);
+
+    if (hours > 0) {
+      return '$hours:${minutes.toString().padLeft(2, '0')}:'
+          '${seconds.toString().padLeft(2, '0')}';
+    }
+
+    return '$minutes:${seconds.toString().padLeft(2, '0')}';
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.black,
+      appBar: AppBar(
+        backgroundColor: Colors.black,
+        foregroundColor: Colors.white,
+        title: const Text('Property Video'),
+      ),
+      body: _error != null
+          ? Center(
+              child: Text(_error!, style: const TextStyle(color: Colors.white)),
+            )
+          : !_ready
+          ? const Center(child: CircularProgressIndicator(color: Colors.white))
+          : ValueListenableBuilder<VideoPlayerValue>(
+              valueListenable: _controller,
+              builder: (context, value, child) {
+                final durationMs = value.duration.inMilliseconds;
+                final maxMs = durationMs > 0 ? durationMs : 1;
+
+                final positionMs = value.position.inMilliseconds
+                    .clamp(0, maxMs)
+                    .toDouble();
+
+                return SizedBox.expand(
+                  child: GestureDetector(
+                    behavior: HitTestBehavior.opaque,
+                    onTap: () {
+                      setState(() {
+                        _showControls = !_showControls;
+                      });
+                    },
+                    child: Stack(
+                      alignment: Alignment.center,
+                      children: [
+                        Center(
+                          child: AspectRatio(
+                            aspectRatio: value.aspectRatio > 0
+                                ? value.aspectRatio
+                                : 16 / 9,
+                            child: VideoPlayer(_controller),
+                          ),
+                        ),
+                        if (_showControls)
+                          Positioned.fill(
+                            child: Container(
+                              color: Colors.black26,
+                              child: Stack(
+                                children: [
+                                  Center(
+                                    child: IconButton(
+                                      onPressed: _togglePlayPause,
+                                      iconSize: 68,
+                                      color: Colors.white,
+                                      icon: Icon(
+                                        value.isPlaying
+                                            ? Icons.pause_circle_filled
+                                            : Icons.play_circle_fill,
+                                      ),
+                                    ),
+                                  ),
+                                  Positioned(
+                                    left: 12,
+                                    right: 12,
+                                    bottom: 12,
+                                    child: SafeArea(
+                                      top: false,
+                                      child: Container(
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 8,
+                                          vertical: 6,
+                                        ),
+                                        decoration: BoxDecoration(
+                                          color: Colors.black87,
+                                          borderRadius: BorderRadius.circular(
+                                            16,
+                                          ),
+                                        ),
+                                        child: Row(
+                                          children: [
+                                            Text(
+                                              _formatDuration(value.position),
+                                              style: const TextStyle(
+                                                color: Colors.white,
+                                                fontSize: 12,
+                                              ),
+                                            ),
+                                            Expanded(
+                                              child: Slider(
+                                                min: 0,
+                                                max: maxMs.toDouble(),
+                                                value: positionMs,
+                                                onChanged: (newValue) {
+                                                  _controller.seekTo(
+                                                    Duration(
+                                                      milliseconds: newValue
+                                                          .round(),
+                                                    ),
+                                                  );
+                                                },
+                                              ),
+                                            ),
+                                            Text(
+                                              _formatDuration(value.duration),
+                                              style: const TextStyle(
+                                                color: Colors.white,
+                                                fontSize: 12,
+                                              ),
+                                            ),
+                                            IconButton(
+                                              tooltip: _muted
+                                                  ? 'Unmute'
+                                                  : 'Mute',
+                                              color: Colors.white,
+                                              onPressed: _toggleMute,
+                                              icon: Icon(
+                                                _muted
+                                                    ? Icons.volume_off
+                                                    : Icons.volume_up,
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
+                );
+              },
+            ),
+    );
+  }
 }

@@ -176,8 +176,9 @@ class _AccountScreenState extends State<AccountScreen> {
           FilledButton(
             style: FilledButton.styleFrom(backgroundColor: _primaryColor),
             onPressed: () {
-              if (formKey.currentState!.validate())
+              if (formKey.currentState!.validate()) {
                 Navigator.pop(dialogContext, true);
+              }
             },
             child: const Text('Save details'),
           ),

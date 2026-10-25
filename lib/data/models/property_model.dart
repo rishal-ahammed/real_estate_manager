@@ -61,6 +61,7 @@ class Property {
 
   PropertyStatus status;
   List<String> images;
+  List<String> videos;
 
   Property({
     this.propertyId,
@@ -88,9 +89,10 @@ class Property {
     this.pincode = '',
     this.status = PropertyStatus.draft,
     List<String>? images,
-  }) : images = images ?? [];
+    List<String>? videos,
+  }) : images = images ?? [],
+       videos = videos ?? [];
 
-  /// Converts every property field into JSON-compatible data.
   Map<String, dynamic> toJson() {
     return {
       'propertyId': propertyId,
@@ -118,10 +120,10 @@ class Property {
       'pincode': pincode,
       'status': status.name,
       'images': images,
+      'videos': videos,
     };
   }
 
-  /// Restores a property from saved JSON.
   factory Property.fromJson(Map<String, dynamic> json) {
     return Property(
       propertyId: json['propertyId']?.toString(),
@@ -156,7 +158,8 @@ class Property {
         json['pincode'] ?? _nestedValue(json, 'location', 'pincode'),
       ),
       status: _readStatus(json['status']),
-      images: _readStringList(json['images']),
+      images: _readStringList(json['images'] ?? json['allImagePaths']),
+      videos: _readStringList(json['videos']),
     );
   }
 
@@ -208,11 +211,13 @@ class Property {
 
   static PropertyStatus _readStatus(dynamic value) {
     final text = value?.toString().split('.').last;
+
     for (final status in PropertyStatus.values) {
       if (status.name.toLowerCase() == text?.toLowerCase()) {
         return status;
       }
     }
+
     return PropertyStatus.draft;
   }
 
@@ -223,9 +228,11 @@ class Property {
     if (propertyType.trim().isNotEmpty) score += 20;
     if (budget > 0) score += 20;
     if (area.trim().isNotEmpty) score += 20;
+
     if ((bhk != null && bhk! > 0) || (landArea != null && landArea! > 0)) {
       score += 10;
     }
+
     if (images.isNotEmpty) score += 10;
 
     return score;

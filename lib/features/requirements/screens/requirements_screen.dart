@@ -239,7 +239,7 @@ class _RequirementsScreenState extends State<RequirementsScreen> {
               children: [
                 _buildSearchBar(),
                 Padding(
-                  padding: const EdgeInsets.fromLTRB(18, 4, 16, 12),
+                  padding: const EdgeInsets.fromLTRB(18, 2, 16, 12),
                   child: Row(
                     children: [
                       Container(
@@ -323,7 +323,7 @@ class _RequirementsScreenState extends State<RequirementsScreen> {
           border: Border.all(color: const Color(0xFFE7EBF3)),
           boxShadow: [
             BoxShadow(
-              color: const Color(0xFF233B70).withOpacity(0.035),
+              color: Colors.black.withValues(alpha: 0.035),
               blurRadius: 18,
               offset: const Offset(0, 6),
             ),
@@ -377,7 +377,7 @@ class _RequirementsScreenState extends State<RequirementsScreen> {
     return Container(
       color: Colors.white,
 
-      padding: const EdgeInsets.fromLTRB(16, 0, 16, 14),
+      padding: const EdgeInsets.fromLTRB(16, 7, 16, 7),
 
       child: Row(
         children: statuses.map((status) {

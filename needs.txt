@@ -1,0 +1,5 @@
+- video adding
+- images more than 5
+- filter 
+- budget insert simplifying
+- 

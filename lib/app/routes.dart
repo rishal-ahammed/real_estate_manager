@@ -35,18 +35,24 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
           child: Align(
             alignment: Alignment.bottomCenter,
             child: ClipRRect(
-              borderRadius: BorderRadius.circular(40),
+              borderRadius: BorderRadius.circular(25),
               child: BackdropFilter(
-                filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
+                filter: ImageFilter.blur(sigmaX: 8, sigmaY: 18),
                 child: Container(
                   width: (screenWidth * 0.58).clamp(200.0, 270.0),
                   height: 58,
                   padding: const EdgeInsets.symmetric(horizontal: 6),
                   decoration: BoxDecoration(
-                    color: const Color.fromARGB(255, 177, 177, 177).withValues(alpha: 0.48),
-                    borderRadius: BorderRadius.circular(40),
+                    color: const Color.fromARGB(255, 255, 255, 255),
+                    // .withValues(alpha: 1),
+                    borderRadius: BorderRadius.circular(25),
                     border: Border.all(
-                      color: const Color.fromARGB(255, 230, 230, 230).withValues(alpha: 0.28),
+                      color: const Color.fromARGB(
+                        255,
+                        196,
+                        193,
+                        208,
+                      ).withValues(alpha: 0.28),
                       width: 1,
                     ),
                     boxShadow: [
@@ -107,19 +113,19 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 280),
         curve: Curves.easeOutCubic,
-        width: 48,
+        width: 58,
         height: 44,
         alignment: Alignment.center,
         decoration: BoxDecoration(
           color: isSelected
-              ? Colors.white.withValues(alpha: 0.15)
-              : Colors.transparent,
-          borderRadius: BorderRadius.circular(30),
+              ? const Color.fromARGB(255, 129, 136, 152).withValues(alpha: 0.15)
+              : const Color.fromARGB(0, 95, 95, 95),
+          borderRadius: BorderRadius.circular(20),
         ),
         child: Icon(
           isSelected ? selectedIcon : unselectedIcon,
-          color: Colors.white.withValues(alpha: isSelected ? 1.0 : 0.72),
-          size: 25,
+          color: const Color(0xFF1E3A8A),
+          size: 20,
         ),
       ),
     );

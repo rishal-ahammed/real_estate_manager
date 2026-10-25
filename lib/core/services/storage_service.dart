@@ -24,6 +24,9 @@ abstract class StorageService {
 class LocalDeviceStorageService implements StorageService {
   static const String _rootFolderName = 'REAL_ESTATE_APP';
 
+  static const int maxImages = 10;
+  static const int maxVideos = 5;
+
   Future<Directory> _getRootDirectory() async {
     final documentsDirectory = await getApplicationDocumentsDirectory();
     final root = Directory(p.join(documentsDirectory.path, _rootFolderName));
@@ -104,6 +107,55 @@ class LocalDeviceStorageService implements StorageService {
     return cleaned;
   }
 
+  Future<List<String>> _copyMediaFiles({
+    required List<String> sources,
+    required Directory destinationDirectory,
+    required String filePrefix,
+    required int maximumCount,
+    required Set<String> allowedExtensions,
+  }) async {
+    if (sources.length > maximumCount) {
+      throw ArgumentError(
+        'A property can have at most $maximumCount '
+        '${filePrefix == 'property_img' ? 'photos' : 'videos'}.',
+      );
+    }
+
+    await destinationDirectory.create(recursive: true);
+
+    final savedPaths = <String>[];
+
+    for (final sourcePath in sources) {
+      final source = File(sourcePath);
+
+      if (!await source.exists()) {
+        // Existing stored paths may already point to files in this folder.
+        // Missing files are skipped rather than saved as invalid paths.
+        continue;
+      }
+
+      var extension = p.extension(sourcePath).toLowerCase();
+
+      if (extension.isEmpty || !allowedExtensions.contains(extension)) {
+        throw ArgumentError('Unsupported media file type: $sourcePath');
+      }
+
+      final fileName = '${filePrefix}_${savedPaths.length}$extension';
+      final destination = File(p.join(destinationDirectory.path, fileName));
+
+      // Avoid copying a file onto itself when saving existing media.
+      if (p.equals(source.absolute.path, destination.absolute.path)) {
+        savedPaths.add(destination.path);
+        continue;
+      }
+
+      await source.copy(destination.path);
+      savedPaths.add(destination.path);
+    }
+
+    return savedPaths;
+  }
+
   @override
   Future<void> saveProperty(
     dynamic property, {
@@ -134,56 +186,81 @@ class LocalDeviceStorageService implements StorageService {
     await recordDirectory.create(recursive: true);
 
     final imagesDirectory = Directory(p.join(recordDirectory.path, 'Images'));
+    final videosDirectory = Directory(p.join(recordDirectory.path, 'Videos'));
 
-    // Build the new image collection separately so existing images
-    // remain intact while their copies are being prepared.
-    final stagingDirectory = Directory(
+    final imageStagingDirectory = Directory(
       p.join(recordDirectory.path, '.Images_tmp'),
     );
+    final videoStagingDirectory = Directory(
+      p.join(recordDirectory.path, '.Videos_tmp'),
+    );
 
-    if (await stagingDirectory.exists()) {
-      await stagingDirectory.delete(recursive: true);
+    if (model.videos.length > maxVideos) {
+      throw ArgumentError('A property can have at most 5 videos.');
     }
 
-    await stagingDirectory.create(recursive: true);
+    final imageSources = imagePaths ?? model.images;
+    if (imageSources.length > maxImages) {
+      throw ArgumentError('A property can have at most 10 photos.');
+    }
 
-    // An explicitly supplied empty list means remove all images.
-    // If no list is supplied, use the model's existing images.
-    final sources = imagePaths ?? model.images;
-    final stagedNames = <String>[];
+    // Prepare both media collections before replacing existing folders.
+    for (final directory in [imageStagingDirectory, videoStagingDirectory]) {
+      if (await directory.exists()) {
+        await directory.delete(recursive: true);
+      }
+      await directory.create(recursive: true);
+    }
 
     try {
-      for (final sourcePath in sources) {
-        final source = File(sourcePath);
+      final stagedImages = await _copyMediaFiles(
+        sources: imageSources,
+        destinationDirectory: imageStagingDirectory,
+        filePrefix: 'property_img',
+        maximumCount: maxImages,
+        allowedExtensions: {'.jpg', '.jpeg', '.png', '.webp', '.heic', '.heif'},
+      );
 
-        if (!await source.exists()) {
-          continue;
-        }
+      final stagedVideos = await _copyMediaFiles(
+        sources: model.videos,
+        destinationDirectory: videoStagingDirectory,
+        filePrefix: 'property_video',
+        maximumCount: maxVideos,
+        allowedExtensions: {
+          '.mp4',
+          '.mov',
+          '.m4v',
+          '.3gp',
+          '.webm',
+          '.mkv',
+          '.avi',
+        },
+      );
 
-        var extension = p.extension(sourcePath);
-        if (extension.isEmpty) {
-          extension = '.jpg';
-        }
-
-        final imageName = 'property_img_${stagedNames.length}$extension';
-        final destination = File(p.join(stagingDirectory.path, imageName));
-
-        await source.copy(destination.path);
-        stagedNames.add(imageName);
-      }
-
-      // Replace the old image collection only after staging succeeds.
+      // Replace the old media directories after staging is complete.
       if (await imagesDirectory.exists()) {
         await imagesDirectory.delete(recursive: true);
       }
 
-      await stagingDirectory.rename(imagesDirectory.path);
+      if (await videosDirectory.exists()) {
+        await videosDirectory.delete(recursive: true);
+      }
 
-      model.images = stagedNames
-          .map((name) => p.join(imagesDirectory.path, name))
+      await imageStagingDirectory.rename(imagesDirectory.path);
+      await videoStagingDirectory.rename(videosDirectory.path);
+
+      model.images = stagedImages
+          .map((path) => p.join(imagesDirectory.path, p.basename(path)))
+          .toList();
+
+      model.videos = stagedVideos
+          .map((path) => p.join(videosDirectory.path, p.basename(path)))
           .toList();
 
       final data = model.toJson();
+
+      data['images'] = model.images;
+      data['videos'] = model.videos;
 
       // Keep compatibility with the existing detail screen.
       data['pricing'] = {
@@ -212,6 +289,7 @@ class LocalDeviceStorageService implements StorageService {
       data['coverImagePath'] = model.images.isNotEmpty
           ? model.images.first
           : null;
+
       data['allImagePaths'] = model.images;
 
       await _writeJsonAtomically(
@@ -219,10 +297,14 @@ class LocalDeviceStorageService implements StorageService {
         data,
       );
     } catch (_) {
-      // Clean up unfinished staging files when possible.
-      if (await stagingDirectory.exists()) {
-        await stagingDirectory.delete(recursive: true);
+      if (await imageStagingDirectory.exists()) {
+        await imageStagingDirectory.delete(recursive: true);
       }
+
+      if (await videoStagingDirectory.exists()) {
+        await videoStagingDirectory.delete(recursive: true);
+      }
+
       rethrow;
     }
   }
@@ -236,32 +318,73 @@ class LocalDeviceStorageService implements StorageService {
       if (entity is! Directory) continue;
 
       final file = File(p.join(entity.path, 'property.json'));
+
       if (!await file.exists()) continue;
 
       try {
         final data = await _readJson(file);
 
-        // Reconcile the image paths with the saved Images folder.
         final imagesDirectory = Directory(p.join(entity.path, 'Images'));
+
+        final videosDirectory = Directory(p.join(entity.path, 'Videos'));
+
         final imagePaths = <String>[];
+        final videoPaths = <String>[];
 
         if (await imagesDirectory.exists()) {
           final imageFiles = <File>[];
 
-          await for (final imageEntity in imagesDirectory.list()) {
-            if (imageEntity is File) {
-              final extension = p.extension(imageEntity.path).toLowerCase();
-              if (['.jpg', '.jpeg', '.png', '.webp'].contains(extension)) {
-                imageFiles.add(imageEntity);
-              }
+          await for (final mediaEntity in imagesDirectory.list()) {
+            if (mediaEntity is! File) continue;
+
+            final extension = p.extension(mediaEntity.path).toLowerCase();
+
+            if ({
+              '.jpg',
+              '.jpeg',
+              '.png',
+              '.webp',
+              '.heic',
+              '.heif',
+            }.contains(extension)) {
+              imageFiles.add(mediaEntity);
             }
           }
 
           imageFiles.sort((a, b) => a.path.compareTo(b.path));
+
           imagePaths.addAll(imageFiles.map((file) => file.path));
         }
 
+        if (await videosDirectory.exists()) {
+          final videoFiles = <File>[];
+
+          await for (final mediaEntity in videosDirectory.list()) {
+            if (mediaEntity is! File) continue;
+
+            final extension = p.extension(mediaEntity.path).toLowerCase();
+
+            if ({
+              '.mp4',
+              '.mov',
+              '.m4v',
+              '.3gp',
+              '.webm',
+              '.mkv',
+              '.avi',
+            }.contains(extension)) {
+              videoFiles.add(mediaEntity);
+            }
+          }
+
+          videoFiles.sort((a, b) => a.path.compareTo(b.path));
+
+          videoPaths.addAll(videoFiles.map((file) => file.path));
+        }
+
+        // Reconcile saved media paths with files actually present.
         data['images'] = imagePaths;
+        data['videos'] = videoPaths;
         data['allImagePaths'] = imagePaths;
         data['coverImagePath'] = imagePaths.isNotEmpty
             ? imagePaths.first
@@ -270,7 +393,6 @@ class LocalDeviceStorageService implements StorageService {
         records.add(data);
       } catch (error) {
         // Keep other records available if one record is damaged.
-        // Do not silently delete or overwrite the damaged file.
         stderr.writeln('Could not read property file ${file.path}: $error');
       }
     }
@@ -289,10 +411,19 @@ class LocalDeviceStorageService implements StorageService {
     final safeId = _safeId(id);
     final directory = await _getPropertiesDirectory();
     final recordDirectory = Directory(p.join(directory.path, safeId));
+    final propertyFile = File(p.join(recordDirectory.path, 'property.json'));
 
-    if (await recordDirectory.exists()) {
-      await recordDirectory.delete(recursive: true);
+    if (!await propertyFile.exists()) {
+      throw StateError('Property not found: $safeId');
     }
+
+    final data = await _readJson(propertyFile);
+
+    // Preserve every existing field and all media files.
+    data['propertyId'] ??= safeId;
+    data['status'] = PropertyStatus.archived.name;
+
+    await _writeJsonAtomically(propertyFile, data);
   }
 
   @override
@@ -334,6 +465,7 @@ class LocalDeviceStorageService implements StorageService {
       if (entity is! Directory) continue;
 
       final file = File(p.join(entity.path, 'requirement.json'));
+
       if (!await file.exists()) continue;
 
       try {
